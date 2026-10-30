@@ -9,6 +9,14 @@ const deck: Card[] = suits.flatMap(suit => Array.from({ length: 13 }, (_, i) => 
 const key = (card: Card) => `${card.rank}${card.suit}`;
 const combinations = deck.flatMap((first, i) => deck.slice(i + 1).map(second => ({ hole: [first, second], score: preflopHandScore([first, second]) }))).sort((a, b) => b.score - a.score || key(a.hole[0]).localeCompare(key(b.hole[0])) || key(a.hole[1]).localeCompare(key(b.hole[1])));
 
+/** Heuristic bubble adjustments; not an ICM solver. */
+export function bubbleAdjustment(remaining: number, paid: number, depth: number, covers: boolean): { aggression: number; riskPremium: number } {
+  if (remaining <= paid || remaining > paid + Math.max(2, Math.ceil(paid * .25))) return { aggression: 0, riskPremium: 0 };
+  const proximity = 1 - (remaining - paid - 1) / Math.max(1, Math.ceil(paid * .25));
+  if (depth <= 8) return { aggression: .015 * proximity, riskPremium: .01 * proximity };
+  return covers ? { aggression: .07 * proximity, riskPremium: .025 * proximity } : { aggression: -.06 * proximity, riskPremium: .09 * proximity };
+}
+
 export function tournamentOpenPercent(position: TablePosition, depth: number, tableSize: number): number {
   const base = tableSize === 2 && position === 'SB' ? 68 : open[position];
   return Math.max(12, Math.min(80, base + (depth <= 8 ? 10 : depth <= 15 ? 4 : 0)));

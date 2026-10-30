@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { equityVsShoveRange, shoveRangePercent, tournamentPreflopAction } from "./tournament-strategy";
+import { bubbleAdjustment, equityVsShoveRange, shoveRangePercent, tournamentPreflopAction } from "./tournament-strategy";
 import { icmCallThreshold } from "./icm";
 import { bestScore, buildSidePots, compareScore, completeBoard, type Card, type Suit } from "./poker-engine";
 import { getPreflopAdvice, getTablePosition, positionOpenPercent, type TablePosition } from "./preflop-strategy";
@@ -392,7 +392,12 @@ function tournamentAllInCall(game: Game, actor: number, field?: MttField | null,
   lose[actorId] -= call;
   lose[opponentId] += pot + call;
   const payouts = field ? mttPayoutShares() : payoutShares(game.players.length);
-  const threshold = field && mttRemaining(field) > 9 ? call / (pot + call) : icmCallThreshold(fold, win, lose, payouts, actorId);
+  const paid = field ? MTT_PAID : payoutShares(game.players.length).length;
+  const remaining = field ? mttRemaining(field) : game.players.filter(p => p.stack + p.totalBet > 0).length;
+  const depth = (player.stack + player.streetBet) / (game.bigBlind ?? 1);
+  const covers = (game.startingStacks[actor] ?? 0) >= (game.startingStacks[opponent] ?? 0);
+  const adjustment = bubbleAdjustment(remaining, paid, depth, covers);
+  const threshold = field && remaining > 9 ? Math.min(.95, call / (pot + call) + adjustment.riskPremium) : icmCallThreshold(fold, win, lose, payouts, actorId);
   if (threshold === null) return null;
   const opponentPosition = tablePosition(game, opponent);
   const opponentDepth = (game.startingStacks[opponent] ?? (game.players[opponent].totalBet + game.players[opponent].stack)) / (game.bigBlind ?? 1);
@@ -401,13 +406,18 @@ function tournamentAllInCall(game: Game, actor: number, field?: MttField | null,
   return equity >= threshold ? "checkcall" : "fold";
 }
 
-function tournamentPreflopMove(game: Game, actor: number, rng: () => number, aggression: number): Game {
+function tournamentPreflopMove(game: Game, actor: number, rng: () => number, aggression: number, field?: MttField | null): Game {
   const seat = game.players[actor];
   const big = game.bigBlind ?? 1;
   const toCall = Math.max(0, game.currentBet - seat.streetBet);
   const depth = (seat.stack + seat.streetBet) / big;
   const limpers = game.players.filter((p, i) => i !== actor && /跟注/.test(p.lastAction)).length;
-  const action = tournamentPreflopAction(seat.hole, tablePosition(game, actor), depth, activeTableSize(game), game.preflopRaises, toCall / big, limpers, aggression, rng);
+  const remaining = field ? mttRemaining(field) : game.players.filter(p => p.stack + p.totalBet > 0).length;
+  const paid = field ? MTT_PAID : payoutShares(game.players.length).length;
+  const opponents = game.players.filter((p, i) => i !== actor && !p.folded);
+  const covers = opponents.length > 0 && opponents.every(p => (game.startingStacks[actor] ?? 0) >= (game.startingStacks[p.id] ?? 0));
+  const adjustment = bubbleAdjustment(remaining, paid, depth, covers);
+  const action = tournamentPreflopAction(seat.hole, tablePosition(game, actor), depth, activeTableSize(game), game.preflopRaises, toCall / big, limpers, aggression + adjustment.aggression, rng);
   if (action === "fold") return act(game, actor, toCall ? "fold" : "checkcall");
   if (action === "checkcall") return act(game, actor, "checkcall");
   const maxTo = seat.stack + seat.streetBet;
@@ -427,7 +437,7 @@ function mttAiMove(hand: Game, actor: number, field: MttField, rng: () => number
   if (icmAction) return act(hand, actor, icmAction);
   if (hand.street === "preflop") {
     const style = ((Number(seat.name.slice(3)) * 17 || actor * 11) % 7 - 3) * .012;
-    return tournamentPreflopMove(hand, actor, rng, style);
+    return tournamentPreflopMove(hand, actor, rng, style, field);
   }
   const pot = potTotal(hand);
   const equity = estimateEquity(hand, actor, difficulty === "casual" ? 6 : difficulty === "pro" ? 16 : 10, rng);
@@ -810,7 +820,7 @@ function personality(actor: number) { return AI_PERSONALITIES[(actor - 1) % AI_P
 function aiMove(game: Game, actor: number, difficulty: Difficulty, field?: MttField | null): Game {
   const icmAction = tournamentAllInCall(game, actor, field);
   if (icmAction) return act(game, actor, icmAction);
-  if (game.tournamentFinishes && game.street === "preflop") return tournamentPreflopMove(game, actor, Math.random, personality(actor).aggression);
+  if (game.tournamentFinishes && game.street === "preflop") return tournamentPreflopMove(game, actor, Math.random, personality(actor).aggression, field);
   const seat = game.players[actor];
   const pot = potTotal(game);
   const toCall = Math.max(0, game.currentBet - seat.streetBet);
@@ -2611,7 +2621,7 @@ export default function Home() {
             return <div key={player.id} className={`table-seat seat-pos-${slot} ${player.folded ? "folded" : ""} ${player.allIn ? "all-in" : ""} ${game.turn === index ? "acting" : ""} ${visibleMotion?.foldedSeat === index ? "standard-seat-fold" : ""} ${visibleMotion?.winners.includes(index) ? "standard-seat-win" : ""}`}>
             {index !== 0 && <div className={`mini-hole ${game.finished && (studyMode || !player.folded) ? "revealed" : ""} ${visibleMotion?.deal ? "standard-dealing" : ""}`}>{player.hole.map((card, cardIndex) => <CardView key={cardIndex} card={card} mini hidden={!game.finished || player.folded && !studyMode} />)}</div>}
             <div className={`avatar ${index === 0 ? "hero-avatar" : ""}`}>{index === 0 ? "你" : index}</div>
-            <div className="seat-copy"><span>{index === 0 || isTournament && mtt ? player.name : `${player.name} · ${personality(index).name} · ${personality(index).style}`}{(player.stack > 0 || !isTournament && game.rebuysUsed[index] < MAX_REBUYS) && <em className="position-tag">{displayPosition(game, index)}</em>}{!isTournament && <em aria-label={`剩餘 ${MAX_REBUYS - game.rebuysUsed[index]} 次 Re-buy`} className={`rebuy-tag ${game.rebuysUsed[index] >= MAX_REBUYS ? "depleted" : ""}`}>R{MAX_REBUYS - game.rebuysUsed[index]}</em>}</span><b>{player.stack > 0 ? `${fmt(player.stack)}${isTournament ? " 籌碼" : " BB"}` : !game.finished && player.allIn ? "ALL-IN" : !isTournament && game.rebuysUsed[index] < MAX_REBUYS ? "待補 100BB" : "OUT"}</b>{isTournament && player.stack > 0 && <em className={`tournament-depth ${player.stack / (game.bigBlind ?? 1) < 10 ? "short" : ""}`}>{fmt(player.stack / (game.bigBlind ?? 1))} BB</em>}<small>{player.lastAction}</small></div>
+            <div className="seat-copy"><span>{index === 0 || isTournament && mtt ? player.name : <>{player.name} · {personality(index).name}<em className="seat-personality"> · {personality(index).style}</em></>}{(player.stack > 0 || !isTournament && game.rebuysUsed[index] < MAX_REBUYS) && <em className="position-tag">{displayPosition(game, index)}</em>}{!isTournament && <em aria-label={`剩餘 ${MAX_REBUYS - game.rebuysUsed[index]} 次 Re-buy`} className={`rebuy-tag ${game.rebuysUsed[index] >= MAX_REBUYS ? "depleted" : ""}`}>R{MAX_REBUYS - game.rebuysUsed[index]}</em>}</span><b>{player.stack > 0 ? `${fmt(player.stack)}${isTournament ? " 籌碼" : " BB"}` : !game.finished && player.allIn ? "ALL-IN" : !isTournament && game.rebuysUsed[index] < MAX_REBUYS ? "待補 100BB" : "OUT"}</b>{isTournament && player.stack > 0 && <em className={`tournament-depth ${player.stack / (game.bigBlind ?? 1) < 10 ? "short" : ""}`}>{fmt(player.stack / (game.bigBlind ?? 1))} BB</em>}<small>{player.lastAction}</small></div>
             {game.button === index && <span className="dealer">D</span>}
             {player.streetBet > 0 && <span className="seat-bet">{fmt(player.streetBet)}</span>}
           </div>})}

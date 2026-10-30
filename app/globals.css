@@ -178,3 +178,30 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 .runout-actions button { padding: 12px 18px; border: 1px solid #d4b76a; border-radius: 10px; background: #294f3f; color: white; cursor: pointer; }
 .runout-boards > div { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .runout-boards span { display: flex; gap: 4px; }
+
+/* Touch-friendly standard table controls and readable mobile information. */
+@media (max-width:700px) {
+  .app-shell .table-wrap .controls { gap: 8px; padding: 10px; }
+  .app-shell .table-wrap .controls .action { min-height: 52px; font-size: 15px; }
+  .app-shell .raise-presets { gap: 6px; }
+  .app-shell .raise-presets button { min-height: 44px; min-width: 52px; padding: 6px 8px; font-size: 13px; border: 1px solid rgba(255,255,255,.15); border-radius: 8px; }
+  .app-shell .raise-presets button + button { border-left: 1px solid rgba(255,255,255,.15); }
+  .app-shell .raise-control input[type=range] { min-height: 36px; }
+  .app-shell .seat-personality { display: none; }
+  .app-shell .seat-copy span { font-size: 10px; }
+  .app-shell .seat-copy b { font-size: 10px; }
+  .app-shell .seat-copy small { font-size: 9px; max-width: 62px; height: auto; }
+  .app-shell .status-line { min-height: 44px; font-size: 13px; gap: 8px; }
+  .app-shell .tournament-prizes button, .app-shell .mtt-hud button, .app-shell .training-switch button { min-height: 44px; }
+  .app-shell .runout-modal { max-height: 90dvh; overflow-y: auto; }
+  .app-shell .runout-actions button { min-height: 48px; }
+}
+@media (max-width:700px) {
+  .app-shell .hero-hole { bottom: 128px; }
+  .app-shell .seat-copy b { white-space: nowrap; }
+  .runout-modal { max-height: 90dvh; overflow-y: auto; }
+  .runout-actions button { min-height: 48px; }
+}
+@media (max-width:420px) {
+  .app-shell .board .card { width: 38px; height: 56px; }
+}
