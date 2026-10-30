@@ -1,0 +1,24 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const ts = require('typescript');
+require.extensions['.ts'] = (mod, filename) => mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
+const { icmEquity, icmCallThreshold } = require('../app/icm.ts');
+const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-8, `${a} != ${b}`);
+close(icmEquity([100,100,100], [50,30,20], 0), 100/3);
+close(icmEquity([100,100], [100], 0), 50);
+close([0,1,2].reduce((sum, i) => sum + icmEquity([50,100,150], [50,30,20], i), 0), 100);
+const fold = [100, 200, 100], win = [200, 100, 100], lose = [0, 300, 100];
+const threshold = icmCallThreshold(fold, win, lose, [65,35], 0);
+assert.ok(threshold > .5 && threshold < 1, `bubble threshold: ${threshold}`);
+close(icmCallThreshold([100,200], [200,100], [0,300], [100], 0), .5);
+assert.equal(icmCallThreshold(Array(10).fill(10), Array(10).fill(10), Array(10).fill(10), [100], 0), null);
+require.extensions['.tsx'] = (mod, filename) => {
+  const source = fs.readFileSync(filename, 'utf8') + '\nexport { newHand, tournamentAllInCall, seededRandom };';
+  mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
+};
+const { newHand, tournamentAllInCall, seededRandom } = require('../app/page.tsx');
+const base = newHand([100,100,100], 0, 1, seededRandom(21), [2,2,2], 'icm', 0, .5, 1, 0, []);
+const makeScenario = hole => ({ ...base, currentBet: 100, street: 'preflop', players: base.players.map((p, i) => ({ ...p, hole: i === 0 ? hole : p.hole, stack: [99,0,99][i], streetBet: [1,100,1][i], totalBet: [1,100,1][i], allIn: i === 1, folded: i === 2 })) });
+assert.equal(tournamentAllInCall(makeScenario([{rank:14,suit:'s'},{rank:14,suit:'h'}]), 0, null, seededRandom(1)), 'checkcall');
+assert.equal(tournamentAllInCall(makeScenario([{rank:2,suit:'s'},{rank:7,suit:'h'}]), 0, null, seededRandom(1)), 'fold');
+assert.equal(tournamentAllInCall({ ...makeScenario([{rank:14,suit:'s'},{rank:14,suit:'h'}]), tournamentFinishes: undefined }, 0), null);
