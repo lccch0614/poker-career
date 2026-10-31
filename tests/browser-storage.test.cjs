@@ -35,3 +35,28 @@ test('failed quota write preserves the previous stored bankroll', async () => {
   window.localStorage.setItem = setItem;
   assert.equal((await (await pokerStateFetch('/api/poker-state')).json()).state.career.balance, 3000);
 });
+
+test('raw recovery export preserves damaged primary and backup without overwriting', () => {
+  const { readSaveBackup, storageKey } = require('../app/browser-storage.ts');
+  const key = storageKey();
+  values.set(key, '{bad json');
+  values.set(`poker-local-save:local:${key}`, 'preserved backup');
+  assert.deepEqual(readSaveBackup(), { primary: '{bad json', backup: 'preserved backup' });
+  assert.equal(values.get(key), '{bad json');
+});
+
+test('quota fallback compresses and restores a complete save, preserving revision checks', async () => {
+  global.document.baseURI = 'https://example.github.io/compression/';
+  const { storageKey } = require('../app/browser-storage.ts');
+  const setItem = window.localStorage.setItem;
+  window.localStorage.setItem = (key, value) => { if (value.length > 2500) throw new Error('QuotaExceededError'); values.set(key, value); };
+  try {
+    const state = { version: 2, career: { balance: 3000 }, history: 'long poker history '.repeat(4000) };
+    const result = await pokerStateFetch('', { method: 'PUT', headers: { 'x-save-revision': '0' }, body: JSON.stringify(state) });
+    assert.equal(result.status, 200);
+    assert.equal(JSON.parse(values.get(storageKey())).encoding, 'gzip-base64');
+    const restored = await (await pokerStateFetch('')).json();
+    assert.deepEqual(restored.state, state);
+    assert.equal((await pokerStateFetch('', { method: 'PUT', headers: { 'x-save-revision': '0' }, body: JSON.stringify(state) })).status, 409);
+  } finally { window.localStorage.setItem = setItem; }
+});
