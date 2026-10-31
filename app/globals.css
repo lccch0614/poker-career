@@ -281,3 +281,48 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
   .app-shell .table-wrap .controls.tournament-controls > .hint-action { grid-column:1 / -1!important; grid-row:4!important; }
   .app-shell .table-wrap .controls.tournament-controls > .action { min-width:0; }
 }
+
+/* Poker Table 3.0 — presentation only; game state remains the source of truth. */
+.app-shell .felt{border:14px solid #182a2b;border-radius:44% / 13%;background:radial-gradient(ellipse at 50% 42%,#187c6a 0%,#0b544d 48%,#07332f 100%);box-shadow:inset 0 0 0 3px #49635a,inset 0 0 0 7px #102b29,inset 0 0 90px #001c1ab8,0 18px 45px #0008}
+.app-shell .felt:after{inset:18px;border:1px solid #d5bb7966;border-radius:42% / 12%}
+.app-shell .table-seat{background:linear-gradient(160deg,#263638f5,#0c191cf5);border:1px solid #81958d66;box-shadow:0 5px 12px #0008,inset 0 1px #ffffff1a;border-radius:12px}
+.app-shell .avatar{background:linear-gradient(145deg,#567970,#1c3837);border-color:#b9aa80;color:#fff3ce;box-shadow:0 2px 6px #0008}
+.app-shell .hero-avatar{background:linear-gradient(145deg,#e3c785,#97713c);color:#172723}
+.app-shell .table-seat.acting:not(.folded){border-color:#f6d486;box-shadow:0 0 0 2px #f5c569aa,0 0 20px #e8b85988}
+.app-shell .table-seat.all-in:not(.folded){border-color:#f17d68}
+.app-shell .seat-copy span{color:#f4f3e9;font-weight:700}.app-shell .seat-copy b{color:#f6d994;font-variant-numeric:tabular-nums}
+.app-shell .dealer{border:2px solid #c3a66c;box-shadow:0 2px 5px #0009}
+.app-shell .seat-bet{background:linear-gradient(#f9dd99,#c9913b);border:1px solid #fff1c5;box-shadow:0 3px 0 #735021,0 5px 8px #0008}
+.app-shell .pot-chip{background:linear-gradient(#152d2df2,#081b1cf2);border-color:#b6a57188;box-shadow:0 4px 12px #001a18a8}.app-shell .pot-chip b{color:#ffe1a0;font-variant-numeric:tabular-nums}
+.app-shell .felt .card:not(.card-back):not(.card-empty){background:linear-gradient(145deg,#fffef9,#e7e6df);border-color:#fff;box-shadow:0 5px 9px #001b1c99}
+.app-shell .felt .card-back{background:repeating-linear-gradient(45deg,#153e45,#153e45 3px,#337367 3px,#337367 5px);border-color:#e6d8b7}
+.app-shell .hero-hole .card:first-child{transform:rotate(-4deg)}.app-shell .hero-hole .card:last-child{transform:rotate(4deg)}
+.app-shell .controls{background:linear-gradient(145deg,#172629,#0c191b);border-color:#50635d;border-radius:16px;box-shadow:0 8px 22px #0005}
+.app-shell .controls .action{border-radius:10px;box-shadow:inset 0 1px #ffffff29,0 3px 0 #0005;font-weight:800}
+.app-shell .controls .danger{background:linear-gradient(#9b4949,#6d3035);border-color:#bc7772;color:#fff}
+.app-shell .controls .call-action{background:linear-gradient(#477d80,#2d5c60);border-color:#79aaa6;color:white}
+.app-shell .controls .primary{background:linear-gradient(#f0ce7d,#bd8e3b);border-color:#f8dc97;color:#1e251b}
+.app-shell .controls .action:focus-visible,.app-shell .raise-presets button:focus-visible{outline:3px solid #fff2c5;outline-offset:2px}
+.app-shell .raise-presets button{border:1px solid #647974!important;border-radius:7px;background:#203639;color:#e6eee8;padding:5px 10px;font-weight:700}
+.app-shell .standard-chip-flight,.app-shell .standard-pot-award{z-index:8;filter:drop-shadow(0 3px 3px #0008)}
+.app-shell .standard-chip-flight i,.app-shell .standard-pot-award i{width:13px;height:13px;border:3px dashed #f8e4aa;box-shadow:0 2px 0 #392b17,0 3px 5px #0008}
+.app-shell .standard-chip-flight{animation-duration:.48s;animation-timing-function:cubic-bezier(.25,.7,.25,1)}
+.app-shell .standard-pot-award{animation-duration:.7s;animation-timing-function:cubic-bezier(.2,.7,.2,1)}
+@media(max-width:700px) and (orientation:portrait){
+ .app-shell{padding-left:8px;padding-right:8px;padding-bottom:max(20px,env(safe-area-inset-bottom))}
+ .app-shell .felt{min-height:560px;height:min(62vh,610px);border-width:9px;border-radius:43% / 10%}
+ .app-shell .felt:after{inset:10px;border-radius:42% / 9%}
+ .app-shell .table-seat{min-width:78px;max-width:100px;padding:4px;gap:4px}
+ .app-shell .avatar{width:29px;height:29px;flex-basis:29px}
+ .app-shell .seat-copy{min-width:0}.app-shell .seat-copy span{font-size:9px;white-space:nowrap}.app-shell .seat-copy b{font-size:10px}.app-shell .seat-copy small{font-size:9px}
+ .app-shell .seat-pos-0{bottom:15px}.app-shell .seat-pos-1{left:1%;bottom:84px}.app-shell .seat-pos-2{left:0;top:50%}.app-shell .seat-pos-3{left:2%;top:76px}.app-shell .seat-pos-4{top:22px}.app-shell .seat-pos-5{right:2%;top:76px}.app-shell .seat-pos-6{right:0;top:50%}.app-shell .seat-pos-7{right:1%;bottom:84px}
+ .app-shell .hero-hole{bottom:85px}.app-shell .hero-hole .card{width:49px;height:68px}.app-shell .board{top:48%;gap:4px}.app-shell .board .card{width:39px;height:56px}
+ .app-shell .pot-chip{top:35%;white-space:nowrap}.app-shell .status-line{min-height:40px;gap:8px}
+ .app-shell .table-wrap .controls{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:9px}
+ .app-shell .table-wrap .controls.cash-controls>.action.danger{grid-column:1;grid-row:1}.app-shell .table-wrap .controls.cash-controls>.call-action{grid-column:2;grid-row:1}.app-shell .table-wrap .controls.cash-controls>.action.primary{grid-column:3;grid-row:1}
+ .app-shell .table-wrap .controls.cash-controls>.raise-control{grid-column:1/-1;grid-row:2}.app-shell .table-wrap .controls.cash-controls>.hint-action{grid-column:1/-1!important;grid-row:3!important}
+ .app-shell .table-wrap .controls .action{min-width:0;min-height:52px;font-size:13px}.app-shell .raise-control{padding:3px 2px}.app-shell .raise-presets{justify-content:space-between}.app-shell .raise-presets button{flex:1;min-height:38px;padding:4px}
+}
+@media(max-width:700px) and (orientation:portrait){
+ .app-shell .seat-pos-2,.app-shell .seat-pos-6{top:39%}
+}
