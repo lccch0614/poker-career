@@ -55,6 +55,17 @@ for (const jam of [false, true]) {
     assert.ok(!html.includes('收池 +'));
     assert.ok(!html.includes('勝出牌型'));
     assert.ok(html.includes('跳過動畫'));
+    const stage = { ...state, revealStep: 1 };
+    const bigHtml = renderToStaticMarkup(React.createElement(AofTable,{state:stage,onChange(){},onExit(){},saveStatus:'已儲存'}));
+    assert.ok(bigHtml.includes('攤牌即時底池權益'));
+    assert.ok(bigHtml.includes('aof-cinematic'));
+    const smallState = { ...stage, game: { ...stage.game, settledBets: [2, 2, 2, 2] } };
+    const smallHtml = renderToStaticMarkup(React.createElement(AofTable,{state:smallState,onChange(){},onExit(){},saveStatus:'已儲存'}));
+    assert.ok(!smallHtml.includes('攤牌即時底池權益'));
+    assert.ok(!smallHtml.includes('aof-cinematic'));
+    const resultHtml = renderToStaticMarkup(React.createElement(AofTable,{state:{...state,revealStep:5},onChange(){},onExit(){},saveStatus:'已儲存'}));
+    assert.ok(resultHtml.includes('aof-award-flight'));
+    assert.ok(resultHtml.includes('aof-victory-burst'));
   }
 }
 const endedRun = newAof();
