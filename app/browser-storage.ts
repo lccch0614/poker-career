@@ -2,7 +2,7 @@
 // There is no remote service, shared bankroll, or ChatGPT identity in this edition.
 type StoredSave = { state: unknown; updatedAt: number };
 
-function storageKey() {
+export function storageKey() {
   return `poker-career-save:${new URL("./", document.baseURI).pathname}`;
 }
 
@@ -45,4 +45,10 @@ export async function pokerStateFetch(_url: string, init: RequestInit = {}): Pro
   };
   if (navigator.locks) return navigator.locks.request(storageKey(), run);
   return run();
+}
+
+/** Read both raw records without modifying them, including damaged JSON. */
+export function readSaveBackup(): { primary: string | null; backup: string | null } {
+  const key = storageKey();
+  return { primary: window.localStorage.getItem(key), backup: window.localStorage.getItem(`poker-local-save:local:${key}`) };
 }

@@ -12,7 +12,7 @@ import { AOF_BIG_BLINDS, CASH_BIG_BLINDS, TOURNAMENT_ENTRIES, buyAofLife, career
 import { MTT_BACKGROUND_INTERVAL_MS, MTT_ENTRIES, MTT_LEVEL_MS, MTT_PAID, completeMttBatch, completeMttRound, isMttField, mttAverage, mttClockTick, mttElapsed, mttLevel, mttPayoutShares, mttPrize, mttRemaining, mttStandings, newMttField, rebalanceMttField, restoreMttField, type MttField, type MttHighlight } from "./mtt-field";
 import { extendDecisionClock, newDecisionClock, pauseDecisionClock, restoreDecisionClock, tickDecisionClock, type TournamentDecisionClock } from "./tournament-clock";
 import { saveKeepalive } from "./save-transport";
-import { pokerStateFetch } from "./browser-storage";
+import { pokerStateFetch, readSaveBackup } from "./browser-storage";
 
 type Street = "preflop" | "flop" | "turn" | "river" | "showdown";
 type Difficulty = "casual" | "hard" | "pro";
@@ -1929,7 +1929,11 @@ export default function Home() {
   useEffect(() => {
     let active = true;
     pokerStateFetch("/api/poker-state", { cache: "no-store" })
-      .then(response => response.ok ? response.json() : Promise.reject(new Error("restore failed")))
+      .then(async response => {
+        if (response.ok) return response.json();
+        const details = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(details.error === "Browser save is unavailable or damaged" ? "瀏覽器存檔無法讀取或已損壞。" : details.error || "讀取存檔失敗");
+      })
       .then((payload: { state?: unknown; updatedAt?: number | null; cacheOwner?: string }) => {
         if (!active) return false;
         saveRevision.current = payload.updatedAt ?? 0;
@@ -1950,10 +1954,11 @@ export default function Home() {
           return true;
         }
         if (localCandidate) { setLocalRecovery(localCandidate); return false; }
+        if (payload.state != null) throw new Error("存檔格式無法辨認");
         return true;
       })
       .then(ready => { if (active && ready) { setPersistenceReady(true); setSaveStatus("saved"); } })
-      .catch(() => { if (active) setSaveStatus("error"); })
+      .catch((error: unknown) => { if (active) { setSaveFailure(error instanceof Error && error.message.startsWith("Career ") ? "職涯資金記錄未能通過檢查；請先下載備份。" : error instanceof Error ? error.message : "讀取存檔失敗"); setSaveStatus("error"); } })
       .finally(() => { if (active) setRestoreReady(true); });
     return () => { active = false; };
   }, []);
@@ -2478,8 +2483,18 @@ export default function Home() {
     <section><h3>{mtt ? "進行中牌桌" : "目前牌桌"}</h3><div className="tournament-info-tables">{mtt ? mtt.tables.map((table, index) => table.length ? <div key={index}><b>第 {index + 1} 桌 {table.includes(0) ? "· 你所在" : ""}</b><span>{table.length} 人 · 平均 {fmt(table.reduce((total, id) => total + mtt.stacks[id], 0) / table.length)} 籌碼</span></div> : null) : <div><b>本桌</b><span>{game.players.filter(player => player.stack > 0).length} 人 · 平均 {fmt(averageStack)} 籌碼</span></div>}</div></section>
   </div></div></div> : null;
 
+  const downloadRawSave = () => {
+    try {
+      const backup = readSaveBackup();
+      const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), ...backup }, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a"); link.href = url; link.download = `poker-save-backup-${Date.now()}.json`; link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch { setSaveFailure("瀏覽器暫時不允許讀取存檔，無法下載備份。請勿清除網站資料。"); }
+  };
+
   if (!restoreReady) return <main className="restore-shell"><div className="restore-card"><span>♠</span><b>正在恢復牌局</b><small>載入籌碼、Session統計及最近手牌…</small></div></main>;
-  if (!persistenceReady || saveConflict) return <main className="restore-shell"><div className="restore-card"><span>♠</span><b>{localRecovery ? cloudRecovery ? "本機備份比本機存檔新" : "找到呢部裝置嘅本機備份" : saveConflict ? "存檔無法同步或已由另一分頁更新" : "暫時無法恢復存檔"}</b><small>{localRecovery ? `本機備份：${new Date(localRecovery.savedAt).toLocaleString("zh-HK")}。${cloudRecovery ? "請揀本機進度或較舊嘅本機進度；唔會自動覆蓋。" : "本機暫時冇可讀牌局，請選擇是否恢復。"}` : saveFailure || "為免資金帳本錯亂，請重新載入最新牌局。"}</small>{localRecovery && <><button className="resume-table" onClick={() => { hydrateSaved(localRecovery); setLocalRecovery(null); setCloudRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>恢復較新本機備份</button>{cloudRecovery ? <button className="resume-table" onClick={() => { hydrateSaved(cloudRecovery); setLocalRecovery(null); setCloudRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>使用本機存檔</button> : <button className="resume-table" onClick={() => { if (cacheOwner.current) window.localStorage.removeItem(`poker-local-save:${cacheOwner.current}`); setLocalRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>放棄備份，開始新職涯</button>}</>}<button className="resume-table" onClick={() => window.location.reload()}>重新載入</button></div></main>;
+  if (!persistenceReady || saveConflict) return <main className="restore-shell"><div className="restore-card"><span>♠</span><b>{localRecovery ? cloudRecovery ? "本機備份比本機存檔新" : "找到呢部裝置嘅本機備份" : saveConflict ? "存檔無法同步或已由另一分頁更新" : "暫時無法恢復存檔"}</b><small>{localRecovery ? `本機備份：${new Date(localRecovery.savedAt).toLocaleString("zh-HK")}。${cloudRecovery ? "請揀本機進度或較舊嘅本機進度；唔會自動覆蓋。" : "本機暫時冇可讀牌局，請選擇是否恢復。"}` : saveFailure || "為免資金帳本錯亂，請重新載入最新牌局。"}</small>{localRecovery && <><button className="resume-table" onClick={() => { hydrateSaved(localRecovery); setLocalRecovery(null); setCloudRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>恢復較新本機備份</button>{cloudRecovery ? <button className="resume-table" onClick={() => { hydrateSaved(cloudRecovery); setLocalRecovery(null); setCloudRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>使用本機存檔</button> : <button className="resume-table" onClick={() => { if (cacheOwner.current) window.localStorage.removeItem(`poker-local-save:${cacheOwner.current}`); setLocalRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>放棄備份，開始新職涯</button>}</>}<p>請勿清除網站資料；可以先下載現有存檔作備份。</p><button className="resume-table" onClick={downloadRawSave}>下載存檔備份</button><button className="resume-table" onClick={() => window.location.reload()}>重新載入</button></div></main>;
 
   const enterAof = () => {
     if (!aof) {

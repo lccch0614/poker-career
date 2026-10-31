@@ -51,12 +51,16 @@ export function restoreCareerWallet(value: unknown, legacy = false): CareerWalle
     if (!entry || typeof entry.id !== "string" || ids.has(entry.id) || !Number.isFinite(entry.amount) || !Number.isFinite(entry.at)) throw new Error("Career transactions invalid");
     ids.add(entry.id);
   }
-  const balance = Math.round((CAREER_STARTING_BANKROLL + wallet.transactions.reduce((sum, entry) => sum + entry.amount, 0)) * 100) / 100;
-  if (!Number.isFinite(balance) || balance < 0 || Math.abs(balance - (wallet.balance ?? NaN)) > 0.001) throw new Error("Career balance mismatch");
+  // Transactions are posted with cent rounding after each entry; replay the same
+  // arithmetic, particularly for fractional cash-outs after split pots.
+  const balance = wallet.transactions.reduce((sum, entry) => Math.round((sum + entry.amount) * 100) / 100, CAREER_STARTING_BANKROLL);
+  const legacyBalance = Math.round((CAREER_STARTING_BANKROLL + wallet.transactions.reduce((sum, entry) => sum + entry.amount, 0)) * 100) / 100;
+  const savedBalance = wallet.balance ?? NaN;
+  if (!Number.isFinite(savedBalance) || savedBalance < 0 || (Math.abs(balance - savedBalance) > 0.001 && Math.abs(legacyBalance - savedBalance) > 0.001)) throw new Error("Career balance mismatch");
   if (wallet.cash && (!ids.has(`cash:${wallet.cash.id}:buy-in`) || wallet.cash.buyInsPaid < 1 || wallet.cash.buyInsPaid > 3)) throw new Error("Cash session invalid");
   if (wallet.tournament && !ids.has(`tournament:${wallet.tournament.id}:entry`)) throw new Error("Tournament session invalid");
   if (wallet.aof && (!ids.has(`aof:${wallet.aof.id}:life:1`) || wallet.aof.livesPaid < 1 || wallet.aof.livesPaid > 3)) throw new Error("AOF session invalid");
-  return { ...wallet, version: 1, balance, transactions: wallet.transactions };
+  return { ...wallet, version: 1, balance: savedBalance, transactions: wallet.transactions };
 }
 
 function transact(wallet: CareerWallet, entry: CareerTransaction): CareerWallet | null {
