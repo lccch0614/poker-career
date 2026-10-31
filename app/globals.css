@@ -326,3 +326,16 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 @media(max-width:700px) and (orientation:portrait){
  .app-shell .seat-pos-2,.app-shell .seat-pos-6{top:39%}
 }
+
+/* AOF cinematic showdown: visual presentation follows the settled game. */
+.aof-equity-bars{margin:12px 0;padding:14px;border:1px solid #a58651;border-radius:14px;background:linear-gradient(145deg,#172c26,#081714);box-shadow:0 10px 28px #0004}
+.aof-equity-bars>div:first-child{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;color:#f2d28b}.aof-equity-bars small,.aof-equity-bars p{color:#a4b8ac;font-size:11px}.aof-equity-bars p{margin:10px 0 0;line-height:1.5}
+.aof-equity-row{display:grid;grid-template-columns:minmax(46px,75px) 1fr 55px;align-items:center;gap:8px;margin:7px 0;font-size:12px}.aof-equity-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.aof-equity-row b{text-align:right;color:#f4e5b9;font-variant-numeric:tabular-nums}.aof-equity-track{height:9px;overflow:hidden;border-radius:8px;background:#ffffff1c}.aof-equity-track i{display:block;height:100%;border-radius:inherit;background:var(--equity-color);transition:width 1s cubic-bezier(.22,.8,.25,1);box-shadow:0 0 9px var(--equity-color)}
+.aof-shell .aof-cinematic .aof-board .aof-flip{animation-duration:1.05s}.aof-shell .aof-cinematic-result .aof-winner{box-shadow:0 0 0 2px #f5d580,0 0 30px #edbe5c99;animation:aof-victory-glow 1.8s ease-out both}
+.aof-victory-burst{position:absolute;z-index:4;left:50%;top:50%;pointer-events:none}.aof-victory-burst i{position:absolute;width:7px;height:7px;border-radius:50%;background:#ffe29a;box-shadow:0 0 9px #ffcb69;animation:aof-burst 1.3s ease-out both;transform:rotate(calc(var(--particle)*30deg)) translateY(0)}
+.aof-shell .aof-award-flight{position:absolute;left:50%;top:50%;z-index:8;display:flex;gap:2px;pointer-events:none;animation:aof-award-to-seat .9s cubic-bezier(.18,.65,.25,1) both}.aof-award-flight i{width:13px;height:13px;border:3px dashed #fff0c3;border-radius:50%;background:#bb7832;box-shadow:0 2px 4px #0008}.aof-award-flight i:nth-child(2){background:#39836c}.aof-award-flight i:nth-child(3){background:#b64b4e}
+@keyframes aof-award-to-seat{from{transform:translate(calc(-50% + var(--chip-x)),calc(-50% + var(--chip-y))) scale(.7);opacity:1}80%{opacity:1}to{transform:translate(-50%,-50%) scale(1.15);opacity:0}}
+@keyframes aof-burst{from{transform:rotate(calc(var(--particle)*30deg)) translateY(0) scale(.4);opacity:1}to{transform:rotate(calc(var(--particle)*30deg)) translateY(-115px) scale(.2);opacity:0}}
+@keyframes aof-victory-glow{0%{filter:brightness(1)}35%{filter:brightness(1.6)}100%{filter:brightness(1)}}
+.aof-shell.aof-reduced .aof-equity-track i{transition:none}.aof-shell.aof-reduced .aof-victory-burst,.aof-shell.aof-reduced .aof-award-flight{display:none}
+@media(prefers-reduced-motion:reduce){.aof-equity-track i{transition:none}.aof-shell .aof-victory-burst,.aof-shell .aof-award-flight{display:none!important}.aof-shell .aof-cinematic-result .aof-winner{animation:none}}

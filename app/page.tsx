@@ -1309,6 +1309,8 @@ function AofTable({ state, onChange, onExit, saveStatus, careerBalance = 0, care
   const view = aofPresentation(state);
   const { stats, revealing, step, lives } = view;
   const paid = game.finished && !revealing;
+  // A full cinematic is reserved for contested pots of at least 12 BB.
+  const cinematic = game.finished && game.board.length === 5 && game.players.filter(p => !p.folded).length >= 2 && game.settledBets.reduce((sum, bet) => sum + bet, 0) >= 12;
   const boss = aofBoss(state);
   const [hint, setHint] = useState(false);
   const [fast, setFast] = useState(false);
@@ -1332,10 +1334,10 @@ function AofTable({ state, onChange, onExit, saveStatus, careerBalance = 0, care
   }, [state, game, onChange]);
   useEffect(() => {
     if (!revealing) return;
-    const duration = reduced ? 60 : (fast ? .42 : 1) * [850,1300,1800,2300,1700][step];
+    const duration = reduced ? 60 : cinematic ? (fast ? .42 : 1) * [850,1300,1800,2300,1700][step] : (fast ? 120 : 250);
     const timer = window.setTimeout(() => onChange({ ...state, revealStep: reduced ? 5 : step+1 }), duration);
     return () => window.clearTimeout(timer);
-  }, [state, revealing, step, fast, reduced, onChange]);
+  }, [state, revealing, step, fast, reduced, cinematic, onChange]);
   useEffect(() => {
     const ctx = audioRef.current;
     if (!sound || !ctx || ctx.state !== "running" || !game.finished) return;
@@ -1425,10 +1427,11 @@ function AofTable({ state, onChange, onExit, saveStatus, careerBalance = 0, care
       {paid && state.runFinished && state.bossLastResult && <div className={`aof-boss-result ${state.bossLastResult}`}><b>{state.bossLastResult === "complete" ? "三王擊破 · Boss Run 冠軍！" : state.bossLastResult === "win" ? `擊破 ${AOF_BOSSES[state.bossLastStage ?? 0].name}！` : `${AOF_BOSSES[state.bossLastStage ?? 0].name} 守住關卡`}</b><span>{state.bossLastResult === "loss" ? "下一局可原關重試" : state.bossLastResult === "complete" ? "+25 XP · 已記錄冠軍次數" : "+12 XP · 下一關已解鎖"}</span></div>}
       {boss && paid && state.runFinished && <button className="aof-boss-exit" onClick={() => onChange({ ...state, bossActive: false, bossStage: 0, bossLastResult: undefined, bossLastStage: undefined })}>返回一般三命 Run</button>}
     </section>
-    <section className={`aof-table ${revealing ? "aof-showdown aof-cinematic" : ""} ${moment ? "aof-destiny" : ""}`} aria-label="AOF牌桌">
-      {revealing && <div className="aof-stage-banner" key={`${game.handNo}-${step}`}><small>SHOWDOWN 2.0</small><strong>{stageLabel}</strong><i><span style={{ width: `${((step+1)/5)*100}%` }} /></i></div>}
-      {duel && <div className={`aof-duel-tag ${duel.tone}`} key={`${game.handNo}-${view.board.length}-${duel.title}`}><b>{duel.title}</b><span>{duel.detail}</span></div>}
-      {moment && <div className={`aof-moment ${moment.tone}`} key={`${game.handNo}-${view.board.length}-${moment.title}`}><span>✦ 命運時刻</span><strong>{moment.title}</strong><small>{moment.detail}</small>{[0,1,2,3,4,5].map(i => <i key={i} style={{ "--spark": i } as React.CSSProperties} />)}</div>}
+    <section className={`aof-table ${revealing ? "aof-showdown" : ""} ${revealing && cinematic ? "aof-cinematic" : ""} ${moment && cinematic && revealing ? "aof-destiny" : ""} ${paid && cinematic ? "aof-cinematic-result" : ""}`} aria-label="AOF牌桌">
+      {revealing && cinematic && <div className="aof-stage-banner" key={`${game.handNo}-${step}`}><small>SHOWDOWN 2.0</small><strong>{stageLabel}</strong><i><span style={{ width: `${((step+1)/5)*100}%` }} /></i></div>}
+      {duel && cinematic && revealing && <div className={`aof-duel-tag ${duel.tone}`} key={`${game.handNo}-${view.board.length}-${duel.title}`}><b>{duel.title}</b><span>{duel.detail}</span></div>}
+      {moment && cinematic && revealing && <div className={`aof-moment ${moment.tone}`} key={`${game.handNo}-${view.board.length}-${moment.title}`}><span>✦ 命運時刻</span><strong>{moment.title}</strong><small>{moment.detail}</small>{[0,1,2,3,4,5].map(i => <i key={i} style={{ "--spark": i } as React.CSSProperties} />)}</div>}
+      {paid && cinematic && !reduced && <div className="aof-victory-burst" key={`victory-${game.handNo}`} aria-hidden="true">{Array.from({length: 12}, (_, i) => <i key={i} style={{ "--particle": i } as React.CSSProperties} />)}</div>}
       {view.players.map((p,index) => <div key={index} className={`aof-seat aof-seat-${index} ${game.turn === index ? "acting" : ""} ${p.folded ? "folded" : ""} ${lives[index] === 0 ? "eliminated" : ""} ${!revealing && p.stack > 0 && p.stack <= 3 && lives[index] > 0 ? "aof-short-stack" : ""} ${winners.includes(index) ? "aof-winner" : ""} ${boss?.seat === index ? "aof-boss-seat" : ""}`}>
         <div><b>{boss?.seat === index ? `${boss.name} · ${boss.title}` : p.name}</b><span>{lives[index] === 0 ? "OUT" : tablePosition(game,index)}</span></div><strong>{fmt(p.stack)} BB</strong>
         {!revealing && p.stack > 0 && p.stack <= 3 && lives[index] > 0 && <span className="aof-danger-badge">⚠ 短碼危險</span>}
@@ -1441,10 +1444,12 @@ function AofTable({ state, onChange, onExit, saveStatus, careerBalance = 0, care
         {exposed && !p.folded && equities.length > 0 && <span className="aof-equity">{view.board.length < 4 ? "約 " : ""}{(equities[contenders.indexOf(index)]*100).toFixed(1)}% <small>底池權益</small></span>}
         {outs[contenders.indexOf(index)]?.behind && <span className="aof-outs-badge">{outs[contenders.indexOf(index)].win.length} 反超 outs · {outs[contenders.indexOf(index)].tie.length} 追平</span>}
         {revealing && step === 1 && !p.folded && <span className="aof-chip-travel">{fmt(game.settledBets[index] ?? 0)}BB</span>}
+        {paid && cinematic && !reduced && winners.includes(index) && <span className="aof-award-flight" key={`award-${game.handNo}-${index}`} aria-hidden="true"><i /><i /><i /></span>}
         {winners.includes(index) && <span className="aof-payout">收池 +{fmt(p.stack-(game.startingStacks[index]-game.settledBets[index]))}BB</span>}
       </div>)}
       <div className="aof-centre"><b>{foldReveal ? "娛樂揭牌" : paid ? "本手結束" : `底池 ${fmt(view.pot)}BB`}</b><div className="aof-board">{[0,1,2,3,4].map(i => <div key={`${game.handNo}-${i}-${!!displayBoard[i]}-${foldReveal}`} className={`${displayBoard[i] ? "aof-flip" : ""} ${paid && !foldReveal && displayBoard[i] && winningKeys.has(cardKey(displayBoard[i])) ? "aof-card-used" : ""}`}><CardView card={displayBoard[i]} mini /></div>)}</div><span>{foldReveal ? "假設牌面 · 不計入結果" : revealing ? stageLabel : `第 ${game.handNo} 手`}</span></div>
     </section>
+    {cinematic && exposed && equities.length > 1 && <section className="aof-equity-bars" aria-label="攤牌即時底池權益"><div><strong>底池權益</strong><small>{view.board.length < 4 ? "模擬估算" : "完整枚舉"} · 平分計入</small></div>{contenders.map((index, i) => <div className="aof-equity-row" key={index}><span>{game.players[index].name}</span><div className="aof-equity-track"><i style={{ width: `${Math.max(0, Math.min(100, equities[i] * 100))}%`, "--equity-color": ["#e7bd6c", "#77d8c2", "#8da9eb", "#df8e94"][i % 4] } as React.CSSProperties} /></div><b>{(equities[i] * 100).toFixed(1)}%</b></div>)}<p>按已亮底牌及目前公用牌計算；邊池實際分配可有不同。</p></section>}
     {outs.some(o => o.behind) && <section className="aof-outs-panel" aria-label="落後玩家的outs"><h2>{view.board.length === 3 ? "等 Turn" : "等 River"} · 落後方 OUTS</h2>{outs.map((o,i) => o.behind ? <div className="aof-outs-row" key={contenders[i]}><strong>{PLAYER_NAMES[contenders[i]]} · 反超 {o.win.length} 張／追平 {o.tie.length} 張</strong>{o.win.length > 0 && <div><b>反超</b>{o.win.map(c => <span className={c.suit === "h" || c.suit === "d" ? "red" : ""} key={cardKey(c)}>{RANK_LABEL[c.rank] ?? c.rank}{SUIT_GLYPH[c.suit]}</span>)}</div>}{o.tie.length > 0 && <div><b>追平</b>{o.tie.map(c => <span className={c.suit === "h" || c.suit === "d" ? "red" : ""} key={cardKey(c)}>{RANK_LABEL[c.rank] ?? c.rank}{SUIT_GLYPH[c.suit]}</span>)}</div>}{o.win.length+o.tie.length === 0 && <p>{view.board.length === 3 ? "下一張未能直接反超或追平；仍可能靠兩張連續好牌逆轉。" : "已無反超或追平嘅 River 牌。"}</p>}</div> : null)}<p>按目前牌型判定落後；列出下一張能超越全部對手或並列第一嘅牌。{view.board.length === 3 ? "Flop outs只代表Turn暫時領先，River仍可能被反超；不包括兩張連續好牌嘅組合。" : "Turn outs代表River最終結果。"}未揭底牌視為未知。</p></section>}
     {foldReveal && <p className="aof-fold-note">娛樂揭牌顯示收池 AI 嘅底牌及同一副牌嘅假設 runout；正式牌局已於你棄牌時完結，牌面不影響盈虧、命數或統計。</p>}
     <p className="aof-message" aria-live="polite">{revealing ? `${stageLabel} · 等待揭牌…` : foldReveal ? `${PLAYER_NAMES[game.winners[0]]} 亮牌 · 睇下如果繼續會發生咩事` : paid ? game.message : game.turn === 0 ? "輪到你：全押或棄牌" : `${game.players[game.turn ?? 0].name} 正在思考…`}</p>
