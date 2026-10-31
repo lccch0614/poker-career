@@ -1848,6 +1848,7 @@ export default function Home() {
   const [saveConflict, setSaveConflict] = useState(false);
   const [saveFailure, setSaveFailure] = useState("");
   const [tableMotion, setTableMotion] = useState<StandardTableMotion | null>(null);
+  const [dealMotion, setDealMotion] = useState<{ id: number; tableId: string; handNo: number; seats: number[] } | null>(null);
   const [motionMode, setMotionMode] = useState<"normal" | "fast" | "off">("normal");
   const previousTable = useRef<Game | null>(null);
   const motionSerial = useRef(0);
@@ -2016,9 +2017,10 @@ export default function Home() {
     if (!restoreReady) return;
     const previous = previousTable.current;
     previousTable.current = game;
-    if (!started || aofOpen) { setTableMotion(null); return; }
+    if (!started || aofOpen) { setTableMotion(null); setDealMotion(null); return; }
     if (!previous || previous === game) return;
     const deal = previous.tableId !== game.tableId || previous.handNo !== game.handNo;
+    if (deal) setDealMotion({ id: ++motionSerial.current, tableId: game.tableId, handNo: game.handNo, seats: game.players.map((seat, index) => seat.hole.length ? index : -1).filter(index => index >= 0) });
     const boardFrom = !deal && game.board.length > previous.board.length ? previous.board.length : null;
     const foldedSeat = !deal ? game.players.findIndex((seat, index) => !previous.players[index]?.folded && seat.folded) : -1;
     const chipSeat = !deal ? game.players.findIndex((seat, index) =>
@@ -2028,6 +2030,12 @@ export default function Home() {
       setTableMotion({ id: ++motionSerial.current, tableId: game.tableId, handNo: game.handNo, deal, boardFrom, foldedSeat: foldedSeat >= 0 ? foldedSeat : null, chipSeat: chipSeat >= 0 ? chipSeat : null, winners });
     }
   }, [restoreReady, started, aofOpen, game]);
+
+  useEffect(() => {
+    if (!dealMotion) return;
+    const timer = window.setTimeout(() => setDealMotion(null), 1100);
+    return () => window.clearTimeout(timer);
+  }, [dealMotion]);
 
   useEffect(() => {
     if (!restoreReady || !started || aofOpen || !handFilter.enabled || game.finished || game.street !== "preflop" || game.turn !== 0) return;
@@ -2641,6 +2649,7 @@ export default function Home() {
             {game.button === index && <span className="dealer">D</span>}
             {player.streetBet > 0 && <span className="seat-bet">{fmt(player.streetBet)}</span>}
           </div>})}
+          {dealMotion && dealMotion.tableId === game.tableId && dealMotion.handNo === game.handNo && motionMode !== "off" && dealMotion.seats.map((index, order) => <div key={`deal-${dealMotion.id}-${index}`} className={`standard-deal-flight slot-${SEAT_SLOTS[tableSize][index]}`} aria-hidden="true" style={{ "--deal-delay": `${order * 35}ms` } as React.CSSProperties}><i /><i /></div>)}
           <div className="pot-chip"><span>底池</span><b>{fmt(pot)}{isTournament ? "" : " BB"}</b></div>
           {visibleMotion?.chipSeat !== null && visibleMotion?.chipSeat !== undefined && <div key={`chip-${visibleMotion.id}`} className={`standard-chip-flight slot-${SEAT_SLOTS[tableSize][visibleMotion.chipSeat]}`} aria-hidden="true"><i /><i /><i /></div>}
           {visibleMotion?.winners.map(index => <div key={`award-${visibleMotion.id}-${index}`} className={`standard-pot-award slot-${SEAT_SLOTS[tableSize][index]}`} aria-hidden="true"><i /><i /><i /></div>)}

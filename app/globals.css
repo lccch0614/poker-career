@@ -245,3 +245,27 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
   .app-shell .controls:has(.tournament-decision-clock) .hint-action { grid-row:4!important; }
   .app-shell .controls .tournament-decision-clock button { min-height:36px; }
 }
+
+/* Short, decorative flights follow relative seat positions at every screen size. */
+.app-shell .standard-deal-flight,
+.app-shell .standard-chip-flight,
+.app-shell .standard-pot-award { --seat-x:50%; --seat-y:50%; left:50%; top:34%; pointer-events:none; }
+.app-shell .standard-deal-flight { position:absolute; z-index:7; display:flex; gap:2px; animation:table-deal-flight .42s ease-out var(--deal-delay) both; }
+.app-shell .standard-deal-flight i { width:14px; height:20px; border:1px solid #f3dcaa; border-radius:3px; background:repeating-linear-gradient(45deg,#234e42,#234e42 3px,#c7a969 3px,#c7a969 4px); box-shadow:0 2px 4px #0007; }
+.app-shell .standard-deal-flight i:nth-child(2) { transform:translateY(2px) rotate(8deg); }
+.app-shell .standard-chip-flight { animation:table-chip-in .38s ease-in both; }
+.app-shell .standard-pot-award { animation:table-chip-out .6s ease-out both; }
+.app-shell .standard-deal-flight.slot-0,.app-shell .standard-chip-flight.slot-0,.app-shell .standard-pot-award.slot-0 { --seat-x:50%; --seat-y:91%; }
+.app-shell .standard-deal-flight.slot-1,.app-shell .standard-chip-flight.slot-1,.app-shell .standard-pot-award.slot-1 { --seat-x:14%; --seat-y:79%; }
+.app-shell .standard-deal-flight.slot-2,.app-shell .standard-chip-flight.slot-2,.app-shell .standard-pot-award.slot-2 { --seat-x:11%; --seat-y:50%; }
+.app-shell .standard-deal-flight.slot-3,.app-shell .standard-chip-flight.slot-3,.app-shell .standard-pot-award.slot-3 { --seat-x:17%; --seat-y:17%; }
+.app-shell .standard-deal-flight.slot-4,.app-shell .standard-chip-flight.slot-4,.app-shell .standard-pot-award.slot-4 { --seat-x:50%; --seat-y:11%; }
+.app-shell .standard-deal-flight.slot-5,.app-shell .standard-chip-flight.slot-5,.app-shell .standard-pot-award.slot-5 { --seat-x:83%; --seat-y:17%; }
+.app-shell .standard-deal-flight.slot-6,.app-shell .standard-chip-flight.slot-6,.app-shell .standard-pot-award.slot-6 { --seat-x:89%; --seat-y:50%; }
+.app-shell .standard-deal-flight.slot-7,.app-shell .standard-chip-flight.slot-7,.app-shell .standard-pot-award.slot-7 { --seat-x:86%; --seat-y:79%; }
+@keyframes table-deal-flight { 0% {left:50%;top:34%;opacity:0;transform:translate(-50%,-50%) scale(.65)} 15% {opacity:1} 85% {opacity:1} 100% {left:var(--seat-x);top:var(--seat-y);opacity:0;transform:translate(-50%,-50%) scale(.85)} }
+@keyframes table-chip-in { 0% {left:var(--seat-x);top:var(--seat-y);opacity:1;transform:translate(-50%,-50%) scale(1)} 85% {opacity:1} 100% {left:50%;top:34%;opacity:0;transform:translate(-50%,-50%) scale(.7)} }
+@keyframes table-chip-out { 0% {left:50%;top:34%;opacity:1;transform:translate(-50%,-50%) scale(.7)} 85% {opacity:1} 100% {left:var(--seat-x);top:var(--seat-y);opacity:0;transform:translate(-50%,-50%) scale(1)} }
+.app-shell.standard-motion-fast .standard-deal-flight { animation-duration:.22s; animation-delay:0ms; }
+.app-shell.standard-motion-off .standard-deal-flight { display:none; }
+@media (prefers-reduced-motion:reduce) { .app-shell .standard-deal-flight { display:none!important; } }
