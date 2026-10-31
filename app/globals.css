@@ -237,12 +237,12 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 }
 .app-shell .controls .tournament-decision-clock { grid-column:1 / -1; margin:0; }
 @media(max-width:700px) and (orientation:portrait) {
-  .app-shell .controls:has(.tournament-decision-clock) .tournament-decision-clock { grid-column:1 / -1; grid-row:1; padding:5px 8px; }
-  .app-shell .controls:has(.tournament-decision-clock) .action.danger { grid-row:2!important; }
-  .app-shell .controls:has(.tournament-decision-clock) .call-action { grid-column:2!important; grid-row:2!important; }
-  .app-shell .controls:has(.tournament-decision-clock) .action.primary { grid-row:2!important; }
-  .app-shell .controls:has(.tournament-decision-clock) .raise-control { grid-row:3!important; }
-  .app-shell .controls:has(.tournament-decision-clock) .hint-action { grid-row:4!important; }
+  .app-shell .controls.tournament-controls .tournament-decision-clock { grid-column:1 / -1; grid-row:1; padding:5px 8px; }
+  .app-shell .controls.tournament-controls .action.danger { grid-row:2!important; }
+  .app-shell .controls.tournament-controls .call-action { grid-column:2!important; grid-row:2!important; }
+  .app-shell .controls.tournament-controls .action.primary { grid-row:2!important; }
+  .app-shell .controls.tournament-controls .raise-control { grid-row:3!important; }
+  .app-shell .controls.tournament-controls .hint-action { grid-row:4!important; }
   .app-shell .controls .tournament-decision-clock button { min-height:36px; }
 }
 
@@ -269,3 +269,15 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 .app-shell.standard-motion-fast .standard-deal-flight { animation-duration:.22s; animation-delay:0ms; }
 .app-shell.standard-motion-off .standard-deal-flight { display:none; }
 @media (prefers-reduced-motion:reduce) { .app-shell .standard-deal-flight { display:none!important; } }
+
+/* Explicit action placement avoids overlapping buttons in mobile WebKit. */
+@media (max-width:700px) {
+  .app-shell .table-wrap .controls.tournament-controls { display:grid; grid-template-columns:repeat(3,minmax(0,1fr))!important; }
+  .app-shell .table-wrap .controls.tournament-controls > .tournament-decision-clock { grid-column:1 / -1!important; grid-row:1!important; }
+  .app-shell .table-wrap .controls.tournament-controls > .action.danger { grid-column:1!important; grid-row:2!important; }
+  .app-shell .table-wrap .controls.tournament-controls > .call-action { grid-column:2!important; grid-row:2!important; }
+  .app-shell .table-wrap .controls.tournament-controls > .action.primary { grid-column:3!important; grid-row:2!important; }
+  .app-shell .table-wrap .controls.tournament-controls > .raise-control { grid-column:1 / -1!important; grid-row:3!important; }
+  .app-shell .table-wrap .controls.tournament-controls > .hint-action { grid-column:1 / -1!important; grid-row:4!important; }
+  .app-shell .table-wrap .controls.tournament-controls > .action { min-width:0; }
+}
