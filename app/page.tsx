@@ -1915,6 +1915,13 @@ export default function Home() {
   const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
   const [replayIndex, setReplayIndex] = useState(0);
   const [restoreReady, setRestoreReady] = useState(false);
+  // A long lobby can leave the browser scrolled below the table when a timed
+  // tournament starts. Position the table as the view enters, before paint.
+  useLayoutEffect(() => {
+    if (started && !aofOpen && window.matchMedia("(max-width: 700px) and (orientation: portrait)").matches) {
+      document.querySelector(".table-wrap .felt")?.scrollIntoView({ block: "start", behavior: "instant" });
+    }
+  }, [started, aofOpen]);
   const [persistenceReady, setPersistenceReady] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"loading" | "saving" | "saved" | "error">("loading");
   const [saveConflict, setSaveConflict] = useState(false);

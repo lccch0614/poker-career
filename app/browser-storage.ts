@@ -120,8 +120,11 @@ export async function importSaveState(state: unknown, expected?: { primary: stri
     const revision = Math.max(Date.now(), Number.isSafeInteger(previousRevision) ? previousRevision + 1 : 1);
     // Keep the old copies accessible even if the following write fails.
     window.localStorage.setItem(`poker-before-import:${key}`, JSON.stringify(previous));
-    window.localStorage.setItem(backupKey, JSON.stringify(state));
+    // Replace the primary first: if this fails, neither original record changes.
     window.localStorage.setItem(key, JSON.stringify({ state, updatedAt: revision }));
+    // A full device may reject the secondary copy after the primary succeeds.
+    // Keep the previous secondary (and pre-import archive) in that case.
+    try { window.localStorage.setItem(backupKey, JSON.stringify(state)); } catch { /* primary is already durable */ }
   };
   if (navigator.locks) await navigator.locks.request(storageKey(), run);
   else run();
