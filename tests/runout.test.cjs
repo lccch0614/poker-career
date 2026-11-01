@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, showdown };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, showdown, shouldPlayStandardCinematic, StandardShowdown };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, showdown } = require('../app/page.tsx');
+const { newHand, act, showdown, shouldPlayStandardCinematic, StandardShowdown } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -28,3 +28,23 @@ for (const runs of [1, 2, 3]) {
   assert.ok(Math.abs(result.players.reduce((sum, p) => sum + p.stack, 0) - 60) < 1e-8);
   assert.ok(result.potSummary.some(line => line.includes('邊池')));
 }
+
+// The visual sequence only starts for an important, single-board heads-up all-in.
+let pending = { ...newHand([20, 20], 0, 10, () => .41), allowRunouts: true };
+pending = act(pending, pending.turn, 'raise', 20);
+pending = act(pending, pending.turn, 'checkcall');
+const once = showdown(pending, 1);
+assert.equal(shouldPlayStandardCinematic(pending, once), true);
+assert.equal(shouldPlayStandardCinematic(pending, showdown(pending, 2)), false);
+assert.equal(shouldPlayStandardCinematic(pending, {...once, settledBets:[10,10]}), false);
+assert.equal(shouldPlayStandardCinematic(pending, {...once, settledBets:[15,25]}), false);
+assert.equal(shouldPlayStandardCinematic(once, once), false); // restored completed hands do not replay
+const React = require('react');
+const { renderToStaticMarkup } = require('react-dom/server');
+const html = renderToStaticMarkup(React.createElement(StandardShowdown, {presentation:{game:once,startBoard:pending.board},fast:false,onClose(){}}));
+assert.ok(html.includes('重要底池攤牌'));
+assert.ok(html.includes('跳過動畫'));
+assert.ok(!html.includes('攤牌結果'));
+assert.ok(!html.includes('收池 +'));
+assert.equal(pending.board.length, 0);
+assert.equal(once.board.length, 5);
