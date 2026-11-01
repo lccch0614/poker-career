@@ -92,3 +92,24 @@ test('import refuses to replace the primary if the previous records cannot be pr
   finally { window.localStorage.setItem = setItem; }
   assert.equal(values.get(key), previous);
 });
+
+test('backup decoder skips a structurally invalid copy and finds the valid primary', async () => {
+  const { decodeSaveBackup } = require('../app/browser-storage.ts');
+  const valid = { version: 2, career: { balance: 3000 } };
+  const invalid = { version: 2, career: null };
+  const data = JSON.stringify({ primary: JSON.stringify({ state: valid, updatedAt: 1 }), backup: JSON.stringify(invalid) });
+  assert.deepEqual(await decodeSaveBackup(data, state => !!state.career), valid);
+  await assert.rejects(() => decodeSaveBackup(data, () => false), /沒有可讀取/);
+});
+
+test('import rejects a save changed by another tab after confirmation', async () => {
+  global.document.baseURI = 'https://example.github.io/import-conflict/';
+  const { storageKey, readSaveBackup, importSaveState } = require('../app/browser-storage.ts');
+  const key = storageKey();
+  values.set(key, JSON.stringify({ state: { version: 2, career: { balance: 100 } }, updatedAt: 1 }));
+  const expected = readSaveBackup();
+  const updated = JSON.stringify({ state: { version: 2, career: { balance: 90 } }, updatedAt: 2 });
+  values.set(key, updated);
+  await assert.rejects(() => importSaveState({ version: 2, career: { balance: 500 } }, expected), /另一個分頁/);
+  assert.equal(values.get(key), updated);
+});
