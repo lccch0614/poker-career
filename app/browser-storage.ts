@@ -88,3 +88,37 @@ export function readSaveBackup(): { primary: string | null; backup: string | nul
   const key = storageKey();
   return { primary: window.localStorage.getItem(key), backup: window.localStorage.getItem(`poker-local-save:local:${key}`) };
 }
+
+/** Decode the portable raw backup without touching browser storage. */
+export async function decodeSaveBackup(text: string): Promise<unknown> {
+  if (text.length > 20_000_000) throw new Error("備份檔案過大");
+  const backup = JSON.parse(text) as { primary?: string | null; backup?: string | null };
+  const candidates = [backup.backup, backup.primary];
+  for (const raw of candidates) {
+    if (typeof raw !== "string") continue;
+    try {
+      const value = JSON.parse(raw);
+      if (value?.encoding === "gzip-base64" && typeof value.compressed === "string") return await decompressState(value.compressed);
+      if (value?.state) return value.state;
+      if (value?.version) return value;
+    } catch { /* Try the other copy. */ }
+  }
+  throw new Error("備份內沒有可讀取的存檔");
+}
+
+/** Preserve both old records before replacing a save; refuse if preservation fails. */
+export async function importSaveState(state: unknown): Promise<void> {
+  const run = () => {
+    const key = storageKey();
+    const backupKey = `poker-local-save:local:${key}`;
+    const previous = { ...readSaveBackup(), preservedAt: new Date().toISOString() };
+    const previousRevision = (() => { try { return JSON.parse(previous.primary ?? "null")?.updatedAt ?? 0; } catch { return 0; } })();
+    const revision = Math.max(Date.now(), Number.isSafeInteger(previousRevision) ? previousRevision + 1 : 1);
+    // Keep the old copies accessible even if the following write fails.
+    window.localStorage.setItem(`poker-before-import:${key}`, JSON.stringify(previous));
+    window.localStorage.setItem(backupKey, JSON.stringify(state));
+    window.localStorage.setItem(key, JSON.stringify({ state, updatedAt: revision }));
+  };
+  if (navigator.locks) await navigator.locks.request(storageKey(), run);
+  else run();
+}

@@ -97,14 +97,14 @@ export function cashCannotRebuy(wallet: CareerWallet, id: string, stackBb: numbe
 }
 
 export function openTournament(wallet: CareerWallet, id: string, entry: number, tableSize: number): CareerWallet | null {
-  if (wallet.tournament || !TOURNAMENT_ENTRIES.includes(entry as typeof TOURNAMENT_ENTRIES[number]) || tableSize < 2 || tableSize > 8 && tableSize !== MTT_ENTRIES || wallet.transactions.some(tx => tx.sessionId === id)) return null;
+  if (wallet.tournament || !TOURNAMENT_ENTRIES.includes(entry as typeof TOURNAMENT_ENTRIES[number]) || !Number.isInteger(tableSize) || tableSize < 2 || tableSize > 8 && tableSize !== MTT_ENTRIES || wallet.transactions.some(tx => tx.sessionId === id)) return null;
   const paid = transact(wallet, { id: `tournament:${id}:entry`, sessionId: id, mode: "tournament", kind: "entry", amount: -entry, at: Date.now() });
   return paid && { ...paid, tournament: { id, entry, tableSize } };
 }
 
 export function settleTournament(wallet: CareerWallet, id: string, place: number, tiedPlaces: number[] = []): CareerWallet | null {
   const session = wallet.tournament;
-  if (!session || session.id !== id || place < 1 || place > session.tableSize) return null;
+  if (!session || session.id !== id || !Number.isInteger(place) || place < 1 || place > session.tableSize) return null;
   const shares = payoutShares(session.tableSize);
   const tied = Math.max(1, tiedPlaces.filter(value => value === place).length);
   const fraction = Array.from({ length: tied }, (_, offset) => shares[place - 1 + offset] ?? 0).reduce((sum, share) => sum + share, 0) / tied / 100;

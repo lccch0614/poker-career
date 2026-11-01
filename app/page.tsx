@@ -12,7 +12,7 @@ import { AOF_BIG_BLINDS, CASH_BIG_BLINDS, TOURNAMENT_ENTRIES, buyAofLife, career
 import { MTT_BACKGROUND_INTERVAL_MS, MTT_ENTRIES, MTT_LEVEL_MS, MTT_PAID, completeMttBatch, completeMttRound, isMttField, mttAverage, mttClockTick, mttElapsed, mttLevel, mttPayoutShares, mttPrize, mttRemaining, mttStandings, newMttField, rebalanceMttField, restoreMttField, type MttField, type MttHighlight } from "./mtt-field";
 import { extendDecisionClock, newDecisionClock, pauseDecisionClock, restoreDecisionClock, tickDecisionClock, type TournamentDecisionClock } from "./tournament-clock";
 import { saveKeepalive } from "./save-transport";
-import { pokerStateFetch, readSaveBackup } from "./browser-storage";
+import { pokerStateFetch, readSaveBackup, decodeSaveBackup, importSaveState, storageKey } from "./browser-storage";
 
 type Street = "preflop" | "flop" | "turn" | "river" | "showdown";
 type Difficulty = "casual" | "hard" | "pro";
@@ -1941,6 +1941,8 @@ export default function Home() {
   const lastScheduledCareer = useRef(career);
   const recordedHand = useRef("");
   const timedOutTurn = useRef("");
+  const nextHandRequested = useRef("");
+  const damagedPrimary = useRef(false);
   careerRef.current = career;
   aofRef.current = aof;
   const hero = game.players[0];
@@ -2033,7 +2035,18 @@ export default function Home() {
         return true;
       })
       .then(ready => { if (active && ready) { setPersistenceReady(true); setSaveStatus("saved"); } })
-      .catch((error: unknown) => { if (active) { setSaveFailure(error instanceof Error && error.message.startsWith("Career ") ? "職涯資金記錄未能通過檢查；請先下載備份。" : error instanceof Error ? error.message : "讀取存檔失敗"); setSaveStatus("error"); } })
+      .catch((error: unknown) => { if (active) {
+        try {
+          const raw = readSaveBackup().backup;
+          const candidate: unknown = raw ? JSON.parse(raw) : null;
+          if (isSavedPokerState(candidate)) {
+            restoreCareerWallet(candidate.career, candidate.version === 1);
+            damagedPrimary.current = true;
+            setLocalRecovery(candidate);
+          }
+        } catch { /* Leave damaged records untouched for export. */ }
+        setSaveFailure(error instanceof Error && error.message.startsWith("Career ") ? "職涯資金記錄未能通過檢查；請先下載備份。" : error instanceof Error ? error.message : "讀取存檔失敗"); setSaveStatus("error");
+      } })
       .finally(() => { if (active) setRestoreReady(true); });
     return () => { active = false; };
   }, []);
@@ -2383,6 +2396,9 @@ export default function Home() {
 
   function nextHand() {
     if (mtt && isTournament && mtt.handNo <= game.handNo) return;
+    const requestKey = `${game.tableId}:${game.handNo}`;
+    if (nextHandRequested.current === requestKey) return;
+    nextHandRequested.current = requestKey;
     if (matchOver) {
       openLobby();
     }
@@ -2408,7 +2424,7 @@ export default function Home() {
       const rebuying = isTournament ? [] : game.players.map((player, index) => player.stack <= 0 && game.rebuysUsed[index] < MAX_REBUYS ? index : -1).filter(index => index >= 0);
       if (rebuying.includes(0) && careerRef.current.cash?.id === game.tableId) {
         const paid = rebuyCash(careerRef.current, game.tableId);
-        if (!paid) { setBankrollMessage("餘額不足補回 100BB；請選較低級別開新桌。"); return; }
+        if (!paid) { nextHandRequested.current = ""; setBankrollMessage("餘額不足補回 100BB；請選較低級別開新桌。"); return; }
         commitCareer(paid);
       }
       const nextStacks = game.players.map((player, index) => rebuying.includes(index) ? REBUY_STACK : player.stack);
@@ -2578,8 +2594,33 @@ export default function Home() {
     } catch { setSaveFailure("瀏覽器暫時不允許讀取存檔，無法下載備份。請勿清除網站資料。"); }
   };
 
+  const downloadBeforeImport = () => {
+    try {
+      const raw = window.localStorage.getItem(`poker-before-import:${storageKey()}`);
+      if (!raw) { window.alert("呢部裝置暫時冇匯入前存檔。"); return; }
+      const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+      const link = document.createElement("a"); link.href = url; link.download = `poker-before-import-${Date.now()}.json`; link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch { window.alert("未能讀取匯入前存檔。"); }
+  };
+  const importBackup = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      if (saveInFlight.current || pendingSave.current) throw new Error("請等目前進度儲存完成後再匯入。");
+      const candidate = await decodeSaveBackup(await file.text());
+      if (!isSavedPokerState(candidate) || !Number.isFinite(candidate.savedAt) || !candidate.game.players.length || !Array.isArray(candidate.game.deck) || !Array.isArray(candidate.game.board)) throw new Error("備份格式不完整。");
+      restoreCareerWallet(candidate.career, candidate.version === 1);
+      if (!window.confirm(`備份時間：${new Date(candidate.savedAt).toLocaleString("zh-HK")}。還原會取代目前進度，現有存檔會先保留喺本機。請先關閉其他遊戲分頁。確定繼續？`)) return;
+      await importSaveState(candidate);
+      window.location.reload();
+    } catch (error) {
+      window.alert(`未能匯入備份：${error instanceof Error ? error.message : "檔案無效或瀏覽器儲存空間不足"}。原有存檔已保留。`);
+    }
+  };
+  const backupControls = <div className="backup-controls"><button type="button" onClick={downloadRawSave}>下載存檔備份</button><button type="button" onClick={downloadBeforeImport}>下載匯入前存檔</button><label>匯入存檔備份<input type="file" accept="application/json,.json" onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; void importBackup(file); }} /></label></div>;
+
   if (!restoreReady) return <main className="restore-shell"><div className="restore-card"><span>♠</span><b>正在恢復牌局</b><small>載入籌碼、Session統計及最近手牌…</small></div></main>;
-  if (!persistenceReady || saveConflict) return <main className="restore-shell"><div className="restore-card"><span>♠</span><b>{localRecovery ? cloudRecovery ? "本機備份比本機存檔新" : "找到呢部裝置嘅本機備份" : saveConflict ? "存檔無法同步或已由另一分頁更新" : "暫時無法恢復存檔"}</b><small>{localRecovery ? `本機備份：${new Date(localRecovery.savedAt).toLocaleString("zh-HK")}。${cloudRecovery ? "請揀本機進度或較舊嘅本機進度；唔會自動覆蓋。" : "本機暫時冇可讀牌局，請選擇是否恢復。"}` : saveFailure || "為免資金帳本錯亂，請重新載入最新牌局。"}</small>{localRecovery && <><button className="resume-table" onClick={() => { hydrateSaved(localRecovery); setLocalRecovery(null); setCloudRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>恢復較新本機備份</button>{cloudRecovery ? <button className="resume-table" onClick={() => { hydrateSaved(cloudRecovery); setLocalRecovery(null); setCloudRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>使用本機存檔</button> : <button className="resume-table" onClick={() => { if (cacheOwner.current) window.localStorage.removeItem(`poker-local-save:${cacheOwner.current}`); setLocalRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>放棄備份，開始新職涯</button>}</>}<p>請勿清除網站資料；可以先下載現有存檔作備份。</p><button className="resume-table" onClick={downloadRawSave}>下載存檔備份</button><button className="resume-table" onClick={() => window.location.reload()}>重新載入</button></div></main>;
+  if (!persistenceReady || saveConflict) return <main className="restore-shell"><div className="restore-card"><span>♠</span><b>{localRecovery ? cloudRecovery ? "本機備份比本機存檔新" : "找到呢部裝置嘅本機備份" : saveConflict ? "存檔無法同步或已由另一分頁更新" : "暫時無法恢復存檔"}</b><small>{localRecovery ? `本機備份：${new Date(localRecovery.savedAt).toLocaleString("zh-HK")}。${cloudRecovery ? "請揀本機進度或較舊嘅本機進度；唔會自動覆蓋。" : "本機暫時冇可讀牌局，請選擇是否恢復。"}` : saveFailure || "為免資金帳本錯亂，請重新載入最新牌局。"}</small>{localRecovery && <><button className="resume-table" onClick={() => { if (damagedPrimary.current) { void importSaveState(localRecovery).then(() => window.location.reload()).catch(() => setSaveFailure("未能恢復；請先下載備份及檢查儲存空間。")); return; } hydrateSaved(localRecovery); setLocalRecovery(null); setCloudRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>恢復較新本機備份</button>{cloudRecovery ? <button className="resume-table" onClick={() => { hydrateSaved(cloudRecovery); setLocalRecovery(null); setCloudRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>使用本機存檔</button> : !damagedPrimary.current && <button className="resume-table" onClick={() => { if (cacheOwner.current) window.localStorage.removeItem(`poker-local-save:${cacheOwner.current}`); setLocalRecovery(null); setPersistenceReady(true); setSaveStatus("saving"); }}>放棄備份，開始新職涯</button>}</>}<p>請勿清除網站資料；可以先下載現有存檔作備份。</p>{backupControls}<button className="resume-table" onClick={() => window.location.reload()}>重新載入</button></div></main>;
 
   const enterAof = () => {
     if (!aof) {
@@ -2632,7 +2673,7 @@ export default function Home() {
       { title: "AOF 挑戰者", value: career.transactions.filter(tx => tx.mode === "aof" && tx.kind === "life" && tx.id.endsWith(":life:1")).length, goal: 5, unit: "次 AOF Run" },
     ].map(item => <div className="career-milestone" key={item.title}><b>{item.value >= item.goal ? "✓ " : "◇ "}{item.title}</b><span>{Math.min(item.value, item.goal)} / {item.goal} · {item.unit}</span></div>)}</section>
     <div className="mode-home-restore"><span>{lastSavedAt ? `上次本機儲存：${new Date(lastSavedAt).toLocaleString("zh-HK", { dateStyle: "short", timeStyle: "short" })}` : "尚未有已完成嘅牌局存檔"}</span><label><input type="checkbox" checked={autoResume} onChange={toggleAutoResume} /> 下次自動返回牌桌</label></div>
-    <section className="mode-home-choices" aria-label="選擇遊戲模式"><h2>開新場</h2><div className="mode-home-grid">
+    {backupControls}<section className="mode-home-choices" aria-label="選擇遊戲模式"><h2>開新場</h2><div className="mode-home-grid">
       <button className="mode-home-choice" onClick={() => chooseMode("cash")}><span className="mode-icon">♠</span><span className="mode-copy"><small>01 · 現金桌</small><strong>Cash Game</strong><em>2–8 人 · 100BB · 最多補碼兩次</em></span><span className="mode-arrow">→</span></button>
       <button className="mode-home-choice" onClick={() => chooseMode("tournament")}><span className="mode-icon">♛</span><span className="mode-copy"><small>02 · 賽事</small><strong>錦標賽</strong><em>單桌或 200 人 · 升盲 · 獎勵圈</em></span><span className="mode-arrow">→</span></button>
       <button className="mode-home-choice" onClick={() => chooseMode("aof")}><span className="mode-icon">♦</span><span className="mode-copy"><small>03 · 快速娛樂</small><strong>AOF Run</strong><em>4 人 · 8BB · 三條命同 Boss Run</em></span><span className="mode-arrow">→</span></button>

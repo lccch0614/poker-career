@@ -363,3 +363,9 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 @media(max-width:600px){.aof-bankroll{padding:12px}.aof-bankroll-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.aof-bankroll-footer{align-items:stretch;flex-direction:column}.aof-bankroll-footer button{width:100%}.aof-shell .aof-header{align-items:flex-start}.aof-shell .aof-header h1{font-size:20px}}
 .aof-settings{margin:8px 0;border:1px solid #456455;border-radius:10px;background:#0b1e17}.aof-settings summary{min-height:42px;padding:11px 13px;cursor:pointer;color:#d7dfcf;font-size:12px;font-weight:700}.aof-settings .aof-playback{padding:0 10px 10px;margin:0}.aof-shell .aof-boss-panel{margin-top:18px}
 @media(max-width:600px){.aof-shell .aof-run-strip{grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:8px 0}.aof-shell .aof-run-strip>div{padding:7px 5px}.aof-shell .aof-run-strip span{font-size:9px}.aof-shell .aof-run-strip b{font-size:12px}}
+
+/* Backup actions remain easy to reach on small touch screens. */
+.backup-controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.backup-controls button, .backup-controls label { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 10px 14px; border: 1px solid #666; border-radius: 10px; color: #fff; background: #263642; cursor: pointer; font: inherit; }
+.backup-controls input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.backup-controls label:focus-within { outline: 2px solid #f5d77a; outline-offset: 2px; }
