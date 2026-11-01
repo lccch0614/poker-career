@@ -204,3 +204,20 @@ dangerState.game.players[0].stack = 2.75;
 const dangerHtml = renderToStaticMarkup(React.createElement(AofTable,{state:dangerState,onChange(){},onExit(){},saveStatus:'已儲存'}));
 assert.ok(dangerHtml.includes('短碼危險'));
 console.log('AOF expansion: 0.25BB ante, carried stacks, life rebuy, danger state, safe restart and v21 save compatibility passed');
+
+// Bankroll presentation never reports an early cash-out as a tournament victory.
+const cashoutState = { ...foldedHero, runFinished: true, cashOutEarly: true };
+const cashoutHtml = renderToStaticMarkup(React.createElement(AofTable, {state:cashoutState,onChange(){},onExit(){},saveStatus:'已儲存',careerBalance:3002,careerStake:1,runInvested:8,runReturned:10,walletOpen:false}));
+assert.ok(cashoutHtml.includes('已結束 Run 並兌回籌碼'));
+assert.ok(!cashoutHtml.includes('你成為最後生還者'));
+assert.ok(cashoutHtml.includes('本 Run 盈虧 +2 C'));
+assert.ok(cashoutHtml.includes('已兌回'));
+const { newCareerWallet, openAof, buyAofLife, closeAof, restoreCareerWallet } = require('../app/career-bankroll.ts');
+let wallet = openAof(newCareerWallet(), 'test-aof', 2);
+assert.equal(wallet.balance, 2984);
+wallet = buyAofLife(wallet, 'test-aof');
+assert.equal(wallet.balance, 2968);
+wallet = closeAof(wallet, 'test-aof', 12.5);
+assert.equal(wallet.balance, 2993);
+assert.equal(closeAof(wallet, 'test-aof', 12.5), null);
+assert.equal(restoreCareerWallet(JSON.parse(JSON.stringify(wallet))).balance, 2993);

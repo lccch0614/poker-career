@@ -29,7 +29,7 @@ for (const runs of [1, 2, 3]) {
   assert.ok(result.potSummary.some(line => line.includes('邊池')));
 }
 
-// The visual sequence only starts for an important, single-board heads-up all-in.
+// The visual sequence starts for important single-board all-ins, including side pots.
 let pending = { ...newHand([20, 20], 0, 10, () => .41), allowRunouts: true };
 pending = act(pending, pending.turn, 'raise', 20);
 pending = act(pending, pending.turn, 'checkcall');
@@ -37,7 +37,8 @@ const once = showdown(pending, 1);
 assert.equal(shouldPlayStandardCinematic(pending, once), true);
 assert.equal(shouldPlayStandardCinematic(pending, showdown(pending, 2)), false);
 assert.equal(shouldPlayStandardCinematic(pending, {...once, settledBets:[10,10]}), false);
-assert.equal(shouldPlayStandardCinematic(pending, {...once, settledBets:[15,25]}), false);
+assert.equal(shouldPlayStandardCinematic(pending, {...once, settledBets:[15,25]}), true);
+assert.equal(shouldPlayStandardCinematic(pending, {...once, showdownAwards:undefined}), false);
 assert.equal(shouldPlayStandardCinematic(once, once), false); // restored completed hands do not replay
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
@@ -48,3 +49,18 @@ assert.ok(!html.includes('攤牌結果'));
 assert.ok(!html.includes('收池 +'));
 assert.equal(pending.board.length, 0);
 assert.equal(once.board.length, 5);
+
+const multi = showdown(game, 1);
+assert.equal(shouldPlayStandardCinematic(game, multi), true);
+assert.equal(multi.showdownAwards.length, 3);
+assert.deepEqual(multi.showdownAwards.map(a => a.amount), [30,20,10]);
+assert.equal(multi.showdownAwards[2].refund, true);
+assert.deepEqual(multi.showdownAwards[2].winners, [2]);
+for (let i=0; i<multi.players.length; i++) {
+  const paid = multi.showdownAwards.filter(a => a.winners.includes(i)).reduce((sum,a) => sum+a.share,0);
+  assert.ok(Math.abs(multi.players[i].stack - paid) < 1e-8);
+}
+const multiHtml = renderToStaticMarkup(React.createElement(StandardShowdown,{presentation:{game:multi,startBoard:game.board},fast:false,onClose(){}}));
+assert.ok(multiHtml.includes('切換自動揭牌'));
+assert.ok(!multiHtml.includes('class="standard-pot-result"'));
+assert.ok(!multiHtml.includes('退回未被跟注籌碼'));
