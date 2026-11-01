@@ -90,7 +90,7 @@ export function readSaveBackup(): { primary: string | null; backup: string | nul
 }
 
 /** Decode the portable raw backup without touching browser storage. */
-export async function decodeSaveBackup(text: string): Promise<unknown> {
+export async function decodeSaveBackup(text: string, isValid: (state: unknown) => boolean = () => true): Promise<unknown> {
   if (text.length > 20_000_000) throw new Error("備份檔案過大");
   const backup = JSON.parse(text) as { primary?: string | null; backup?: string | null };
   const candidates = [backup.backup, backup.primary];
@@ -98,20 +98,24 @@ export async function decodeSaveBackup(text: string): Promise<unknown> {
     if (typeof raw !== "string") continue;
     try {
       const value = JSON.parse(raw);
-      if (value?.encoding === "gzip-base64" && typeof value.compressed === "string") return await decompressState(value.compressed);
-      if (value?.state) return value.state;
-      if (value?.version) return value;
+      const state = value?.encoding === "gzip-base64" && typeof value.compressed === "string"
+        ? await decompressState(value.compressed) : value?.state ?? (value?.version ? value : null);
+      if (state && isValid(state)) return state;
     } catch { /* Try the other copy. */ }
   }
   throw new Error("備份內沒有可讀取的存檔");
 }
 
 /** Preserve both old records before replacing a save; refuse if preservation fails. */
-export async function importSaveState(state: unknown): Promise<void> {
+export async function importSaveState(state: unknown, expected?: { primary: string | null; backup: string | null }): Promise<void> {
   const run = () => {
     const key = storageKey();
     const backupKey = `poker-local-save:local:${key}`;
-    const previous = { ...readSaveBackup(), preservedAt: new Date().toISOString() };
+    const current = readSaveBackup();
+    if (expected && (expected.primary !== current.primary || expected.backup !== current.backup)) {
+      throw new Error("本機存檔已被另一個分頁更新；請重新載入後再試。");
+    }
+    const previous = { ...current, preservedAt: new Date().toISOString() };
     const previousRevision = (() => { try { return JSON.parse(previous.primary ?? "null")?.updatedAt ?? 0; } catch { return 0; } })();
     const revision = Math.max(Date.now(), Number.isSafeInteger(previousRevision) ? previousRevision + 1 : 1);
     // Keep the old copies accessible even if the following write fails.

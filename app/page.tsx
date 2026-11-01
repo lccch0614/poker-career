@@ -2607,11 +2607,15 @@ export default function Home() {
     if (!file) return;
     try {
       if (saveInFlight.current || pendingSave.current) throw new Error("請等目前進度儲存完成後再匯入。");
-      const candidate = await decodeSaveBackup(await file.text());
-      if (!isSavedPokerState(candidate) || !Number.isFinite(candidate.savedAt) || !candidate.game.players.length || !Array.isArray(candidate.game.deck) || !Array.isArray(candidate.game.board)) throw new Error("備份格式不完整。");
-      restoreCareerWallet(candidate.career, candidate.version === 1);
+      const expected = readSaveBackup();
+      const candidate = await decodeSaveBackup(await file.text(), value => {
+        if (!isSavedPokerState(value) || !Number.isFinite(value.savedAt) || !value.game.players.length || !Array.isArray(value.game.deck) || !Array.isArray(value.game.board)) return false;
+        try { restoreCareerWallet(value.career, value.version === 1); return true; } catch { return false; }
+      });
+      if (!isSavedPokerState(candidate)) throw new Error("備份格式不完整。");
       if (!window.confirm(`備份時間：${new Date(candidate.savedAt).toLocaleString("zh-HK")}。還原會取代目前進度，現有存檔會先保留喺本機。請先關閉其他遊戲分頁。確定繼續？`)) return;
-      await importSaveState(candidate);
+      if (saveInFlight.current || pendingSave.current) throw new Error("目前進度仍在儲存，請稍後再試。");
+      await importSaveState(candidate, expected);
       window.location.reload();
     } catch (error) {
       window.alert(`未能匯入備份：${error instanceof Error ? error.message : "檔案無效或瀏覽器儲存空間不足"}。原有存檔已保留。`);
