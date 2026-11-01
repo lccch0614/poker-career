@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bubbleAdjustment, equityVsShoveRange, shoveRangePercent, tournamentPreflopAction } from "./tournament-strategy";
 import { icmCallThreshold } from "./icm";
 import { bestScore, buildSidePots, compareScore, completeBoard, type Card, type Suit } from "./poker-engine";
@@ -265,6 +265,51 @@ function showdown(game: Game, runs = 1): Game {
   const message = lead === undefined ? "牌局結束" : `${players[lead].name}${leadHand}贏得 ${fmt(awards[lead])}BB${winners.length > 1 ? "（另有分池）" : ""}`;
   const tournamentFinishes = game.tournamentFinishes ? recordTournamentFinishes(game.tournamentFinishes, game.startingStacks, players.map(player => player.stack), game.handNo) : undefined;
   return addLog({ ...game, ...completed, runoutPending: false, runoutBoards: boards, players, settledBets, tournamentFinishes, street: "showdown", pending: players.map(() => false), turn: null, finished: true, winners, potSummary: summaries }, message);
+}
+
+// Presentation is deliberately transient: the game has already settled and remains authoritative.
+type StandardCinematic = { game: Game; startBoard: Card[] };
+function shouldPlayStandardCinematic(before: Game, after: Game) {
+  const contenders = after.players.map((p, i) => !p.folded ? i : -1).filter(i => i >= 0);
+  const bb = after.bigBlind ?? 1;
+  return !before.finished && after.finished && before.tableId === after.tableId && before.handNo === after.handNo
+    && after.street === "showdown" && before.board.length < 5 && after.board.length === 5
+    && (after.runoutBoards?.length ?? 1) === 1 && contenders.length === 2
+    && after.players.some(p => !p.folded && p.allIn)
+    && Math.abs((after.settledBets[contenders[0]] ?? 0) - (after.settledBets[contenders[1]] ?? 0)) < .001
+    && after.settledBets.reduce((sum, amount) => sum + amount, 0) >= 40 * bb;
+}
+
+function StandardShowdown({ presentation, fast, onClose }: { presentation: StandardCinematic; fast: boolean; onClose: () => void }) {
+  const { game, startBoard } = presentation;
+  const contenders = game.players.map((p, i) => !p.folded ? i : -1).filter(i => i >= 0);
+  const lengths = [startBoard.length, 3, 4, 5].filter((n, i, all) => n >= startBoard.length && all.indexOf(n) === i);
+  const [step, setStep] = useState(0);
+  const result = step >= lengths.length;
+  const count = result ? 5 : lengths[step];
+  const board = game.board.slice(0, count);
+  const holes = contenders.map(i => game.players[i].hole);
+  const equities = useMemo(() => aofExposedEquity(holes, board), [count]);
+  const moment = useMemo(() => count >= 4 && !result ? aofMoment(holes, board, contenders.map(i => game.players[i].name)) : null, [count, result]);
+  useEffect(() => {
+    if (result) return;
+    const timer = window.setTimeout(() => setStep(value => value + 1), fast ? 650 : count >= 4 ? 2200 : 1500);
+    return () => window.clearTimeout(timer);
+  }, [step, result, count, fast]);
+  return <div className="standard-cinema-overlay" role="dialog" aria-modal="true" aria-label="重要底池攤牌">
+    <section className={`standard-cinema ${result ? "standard-cinema-result" : ""}`}>
+      <header><span>ALL-IN SHOWDOWN</span><strong>{result ? "攤牌結果" : count === 0 ? "全押對決" : count === 3 ? "FLOP · 翻牌" : count === 4 ? "TURN · 轉牌" : "RIVER · 河牌"}</strong><small>底池 {fmt(game.settledBets.reduce((a,b) => a+b,0))} {game.tournamentFinishes ? "籌碼" : "BB"}</small></header>
+      {moment && <div className="standard-cinema-moment" key={`${count}-${moment.title}`} role="status"><b>{moment.title}</b><span>{moment.detail}</span></div>}
+      <div className="standard-cinema-players">{contenders.map((index, i) => <div className={`standard-cinema-player ${result && game.winners.includes(index) ? "winner" : ""}`} key={index}>
+        <div><strong>{game.players[index].name}</strong>{result && game.winners.includes(index) && <b>勝出 ✦</b>}</div><div className="standard-cinema-holes">{game.players[index].hole.map((card, j) => <CardView key={j} card={card} mini />)}</div>
+        <div className="standard-cinema-equity"><i><span style={{width:`${equities[i] * 100}%`}} /></i><b>{(equities[i] * 100).toFixed(1)}%</b></div>
+        {result && game.winners.includes(index) && <div className="standard-cinema-award" key={index}><i>●</i><i>●</i><i>●</i><strong>收池 +{fmt(game.players[index].stack - (game.startingStacks[index] - game.settledBets[index]))}</strong></div>}
+      </div>)}</div>
+      <div className="standard-cinema-board">{[0,1,2,3,4].map(i => <div key={`${i}-${i<count}`} className={i<count && i>=startBoard.length ? "standard-cinema-flip" : ""}><CardView card={board[i]} /></div>)}</div>
+      <p>{result ? game.potSummary.join(" · ") : count < 4 ? "估算底池權益；平分計入。只使用已亮底牌及目前公用牌。" : "底池權益按已亮底牌及目前公用牌計算，平分計入。"}</p>
+      <button onClick={onClose}>{result ? "查看結果" : "跳過動畫"}</button>
+    </section>
+  </div>;
 }
 
 function AllInChoice({ game, onChoose }: { game: Game; onChoose: (runs: number) => void }) {
@@ -1856,6 +1901,7 @@ export default function Home() {
   const [dealMotion, setDealMotion] = useState<{ id: number; tableId: string; handNo: number; seats: number[] } | null>(null);
   const [motionMode, setMotionMode] = useState<"normal" | "fast" | "off">("normal");
   const previousTable = useRef<Game | null>(null);
+  const [standardCinematic, setStandardCinematic] = useState<StandardCinematic | null>(null);
   const motionSerial = useRef(0);
   useEffect(() => {
     const saved = window.localStorage.getItem("poker-standard-motion");
@@ -2018,13 +2064,15 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [restoreReady, started, aofOpen, game.turn, game.finished, game.handNo, game.actionId, difficulty, mtt]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!restoreReady) return;
     const previous = previousTable.current;
     previousTable.current = game;
-    if (!started || aofOpen) { setTableMotion(null); setDealMotion(null); return; }
+    if (!started || aofOpen) { setTableMotion(null); setDealMotion(null); setStandardCinematic(null); return; }
     if (!previous || previous === game) return;
     const deal = previous.tableId !== game.tableId || previous.handNo !== game.handNo;
+    if (deal) setStandardCinematic(null);
+    if (motionMode !== "off" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && shouldPlayStandardCinematic(previous, game)) setStandardCinematic({game, startBoard: previous.board});
     if (deal) setDealMotion({ id: ++motionSerial.current, tableId: game.tableId, handNo: game.handNo, seats: game.players.map((seat, index) => seat.hole.length ? index : -1).filter(index => index >= 0) });
     const boardFrom = !deal && game.board.length > previous.board.length ? previous.board.length : null;
     const foldedSeat = !deal ? game.players.findIndex((seat, index) => !previous.players[index]?.folded && seat.folded) : -1;
@@ -2299,16 +2347,16 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (!autoNextHand) return;
+    if (!autoNextHand || standardCinematic) return;
     const timer = window.setTimeout(() => nextHand(), 2200);
     return () => window.clearTimeout(timer);
-  }, [autoNextHand, game.tableId, game.handNo]);
+  }, [autoNextHand, game.tableId, game.handNo, standardCinematic]);
 
   useEffect(() => {
-    if (!autoSpectate) return;
+    if (!autoSpectate || standardCinematic) return;
     const timer = window.setTimeout(() => nextHand(), 900);
     return () => window.clearTimeout(timer);
-  }, [autoSpectate, game.tableId, game.handNo]);
+  }, [autoSpectate, game.tableId, game.handNo, standardCinematic]);
 
   function nextHand() {
     if (mtt && isTournament && mtt.handNo <= game.handNo) return;
@@ -2611,14 +2659,14 @@ export default function Home() {
     </section>
   </main>{reviewModal}{leakModal}{scenarioModal}{mttHighlightsModal}{tournamentInfoModal}</>;
 
-  return <>{game.runoutPending && <AllInChoice game={game} onChoose={requested => setGame(previous => {
+  return <>{standardCinematic && <StandardShowdown key={`${standardCinematic.game.tableId}-${standardCinematic.game.handNo}`} presentation={standardCinematic} fast={motionMode === "fast"} onClose={() => setStandardCinematic(null)} />}{game.runoutPending && <AllInChoice game={game} onChoose={requested => setGame(previous => {
     if (!previous.runoutPending) return previous;
     const choices = previous.players.map((player, index) => index && !player.folded ? { index, count: 1 + ((index + previous.handNo - 1) % 3) } : null).filter((choice): choice is { index: number; count: number } => choice !== null);
     const runs = Math.min(requested, ...choices.map(choice => choice.count));
     const result = showdown(previous, runs);
     const logged = addLog(result, `你提議 ${requested} 次；${choices.map(choice => `${previous.players[choice.index].name} 接受最多 ${choice.count} 次`).join("、")}；最終派 ${runs} 次`);
     return { ...logged, message: result.message };
-  })} />}<main className={`app-shell standard-motion-${motionMode}`}>
+  })} />}<main className={`app-shell standard-motion-${motionMode}`} aria-hidden={!!standardCinematic} inert={!!standardCinematic}>
     <div className="three-mode-picker table-mode-picker" role="group" aria-label="切換遊戲模式">
       <button className={gameMode === "cash" ? "selected" : ""} onClick={() => openModeLobby("cash")}><b>Cash</b><small>100BB</small></button>
       <button className={gameMode === "tournament" ? "selected" : ""} onClick={() => openModeLobby("tournament")}><b>錦標賽</b><small>升盲</small></button>
