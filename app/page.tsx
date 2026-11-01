@@ -1110,7 +1110,10 @@ function aofDecision(game: Game, actor: number, boss?: AofBoss | null) {
   const position = tablePosition(game, actor);
   const actorStart = game.startingStacks[actor] ?? game.players[actor].stack+game.players[actor].totalBet;
   const opponentStarts = game.startingStacks.filter((stack,index) => index !== actor && stack > 0 && !game.players[index].folded);
-  const effectiveStack = Math.min(actorStart,Math.max(...opponentStarts,actorStart));
+  // An all-in can only win chips covered by at least one remaining opponent.
+  // Do not include actorStart in the opponent maximum: doing so always made
+  // the result equal to the actor's own stack, even against short stacks.
+  const effectiveStack = Math.min(actorStart, opponentStarts.length ? Math.max(...opponentStarts) : actorStart);
   const stackAdjustment = effectiveStack <= 3 ? -.12 : effectiveStack <= 5 ? -.075 : effectiveStack >= 16 ? .075 : effectiveStack >= 12 ? .04 : 0;
   const anteAdjustment = (game.ante ?? 0) > 0 ? -.035 : 0;
   const toCall = Math.max(0,game.currentBet-game.players[actor].streetBet);
