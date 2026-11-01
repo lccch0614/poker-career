@@ -60,3 +60,35 @@ test('quota fallback compresses and restores a complete save, preserving revisio
     assert.equal((await pokerStateFetch('', { method: 'PUT', headers: { 'x-save-revision': '0' }, body: JSON.stringify(state) })).status, 409);
   } finally { window.localStorage.setItem = setItem; }
 });
+
+test('portable backup restores state and retains both previous records', async () => {
+  global.document.baseURI = 'https://example.github.io/import/';
+  const { storageKey, decodeSaveBackup, importSaveState } = require('../app/browser-storage.ts');
+  const key = storageKey();
+  const oldState = { version: 2, career: { balance: 100 } };
+  const newState = { version: 2, career: { balance: 200 } };
+  const oldPrimary = JSON.stringify({ state: oldState, updatedAt: 3 });
+  const oldBackup = JSON.stringify(oldState);
+  values.set(key, oldPrimary);
+  values.set(`poker-local-save:local:${key}`, oldBackup);
+  assert.deepEqual(await decodeSaveBackup(JSON.stringify({ primary: JSON.stringify({ state: newState, updatedAt: 1 }) })), newState);
+  await importSaveState(newState);
+  assert.deepEqual((await (await pokerStateFetch('')).json()).state, newState);
+  const preserved = JSON.parse(values.get(`poker-before-import:${key}`));
+  assert.equal(preserved.primary, oldPrimary);
+  assert.equal(preserved.backup, oldBackup);
+  await assert.rejects(() => decodeSaveBackup('{bad'));
+});
+
+test('import refuses to replace the primary if the previous records cannot be preserved', async () => {
+  global.document.baseURI = 'https://example.github.io/import-failure/';
+  const { storageKey, importSaveState } = require('../app/browser-storage.ts');
+  const key = storageKey();
+  const previous = JSON.stringify({ state: { version: 2, career: { balance: 42 } }, updatedAt: 5 });
+  values.set(key, previous);
+  const setItem = window.localStorage.setItem;
+  window.localStorage.setItem = () => { throw new Error('quota'); };
+  try { await assert.rejects(() => importSaveState({ version: 2, career: { balance: 0 } })); }
+  finally { window.localStorage.setItem = setItem; }
+  assert.equal(values.get(key), previous);
+});
