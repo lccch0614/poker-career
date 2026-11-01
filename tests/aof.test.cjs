@@ -9,6 +9,13 @@ for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => 
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
 const { newHand, newAof, aofAct, aofDecision, aofPresentation, aofExposedEquity, aofBestFive, aofOuts, aofDuelLabel, aofNextHand, aofWhatIfBoard, aofHandKey, aofMatrixKey, aofCollectDeal, aofCollectResult, aofStartBossRun, aofRestartRun, AOF_BOSSES, AofTable } = require('../app/page.tsx');
+// Deep stacks must adjust to the largest *live opponent*, not their own stack.
+const effectiveDepthGame = newHand([20, 3, 2, 0], 0, 1, () => .5, [0,0,0,0], 'effective-depth', .25);
+effectiveDepthGame.players[0].hole = [{rank: 8, suit: 's'}, {rank: 7, suit: 'h'}];
+assert.match(aofDecision(effectiveDepthGame, 0).reason, /有效籌碼只剩 3BB/);
+const withFoldedDeepOpponent = { ...effectiveDepthGame, startingStacks: [20,3,2,18], players: effectiveDepthGame.players.map((player, index) => index === 3 ? { ...player, folded: true } : player) };
+assert.match(aofDecision(withFoldedDeepOpponent, 0).reason, /有效籌碼只剩 3BB/);
+
 const anteState = newAof();
 assert.equal(anteState.game.ante,.25);
 assert.deepEqual(anteState.game.players.map(player => player.totalBet),[.25,.75,1.25,.25]);
