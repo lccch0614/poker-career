@@ -113,3 +113,35 @@ test('import rejects a save changed by another tab after confirmation', async ()
   await assert.rejects(() => importSaveState({ version: 2, career: { balance: 500 } }, expected), /另一個分頁/);
   assert.equal(values.get(key), updated);
 });
+
+test('failed primary import leaves both original records intact', async () => {
+  global.document.baseURI = 'https://example.github.io/import-primary-failure/';
+  const { storageKey, readSaveBackup, importSaveState } = require('../app/browser-storage.ts');
+  const key = storageKey();
+  const primary = JSON.stringify({ state: { version: 2, career: { balance: 42 } }, updatedAt: 5 });
+  const backup = JSON.stringify({ version: 2, career: { balance: 41 } });
+  values.set(key, primary);
+  values.set(`poker-local-save:local:${key}`, backup);
+  const originalSetItem = window.localStorage.setItem;
+  window.localStorage.setItem = (itemKey, value) => { if (itemKey === key) throw new Error('quota'); originalSetItem(itemKey, value); };
+  try { await assert.rejects(() => importSaveState({ version: 2, career: { balance: 10 } })); }
+  finally { window.localStorage.setItem = originalSetItem; }
+  assert.deepEqual(readSaveBackup(), { primary, backup });
+});
+
+test('secondary quota failure after import keeps the committed save and old backup', async () => {
+  global.document.baseURI = 'https://example.github.io/import-secondary-failure/';
+  const { storageKey, readSaveBackup, importSaveState } = require('../app/browser-storage.ts');
+  const key = storageKey();
+  const backupKey = `poker-local-save:local:${key}`;
+  const oldState = { version: 2, career: { balance: 42 } };
+  const newState = { version: 2, career: { balance: 100 } };
+  values.set(key, JSON.stringify({ state: oldState, updatedAt: 5 }));
+  values.set(backupKey, JSON.stringify(oldState));
+  const originalSetItem = window.localStorage.setItem;
+  window.localStorage.setItem = (itemKey, value) => { if (itemKey === backupKey) throw new Error('quota'); originalSetItem(itemKey, value); };
+  try { await importSaveState(newState); }
+  finally { window.localStorage.setItem = originalSetItem; }
+  assert.deepEqual((await (await pokerStateFetch('')).json()).state, newState);
+  assert.equal(readSaveBackup().backup, JSON.stringify(oldState));
+});
