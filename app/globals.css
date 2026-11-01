@@ -369,3 +369,22 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 .backup-controls button, .backup-controls label { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 10px 14px; border: 1px solid #666; border-radius: 10px; color: #fff; background: #263642; cursor: pointer; font: inherit; }
 .backup-controls input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .backup-controls label:focus-within { outline: 2px solid #f5d77a; outline-offset: 2px; }
+
+/* Keep hole cards visible when the sticky action panel covers the bottom of the table. */
+.mobile-hero-summary { display:none; }
+@media(max-width:700px) and (orientation:portrait) {
+ .app-shell .table-wrap .controls > .mobile-hero-summary { display:flex; grid-column:1/-1; grid-row:1; align-items:center; gap:8px; min-width:0; padding:3px 6px; background:#0a1b1a; border:1px solid #536c5c; border-radius:9px; color:#f5e8c9; }
+ .mobile-hero-title { font-size:11px; white-space:nowrap; }
+ .mobile-hero-cards { display:flex; gap:3px; }
+ .mobile-hero-cards .mini-card { width:27px; height:36px; padding:2px; border-radius:4px; }
+ .mobile-hero-cards .mini-card b, .mobile-hero-cards .mini-card span { font-size:11px; }
+ .mobile-hero-stack { margin-left:auto; text-align:right; font-weight:700; font-size:13px; }
+ .mobile-hero-stack small { display:block; font-size:10px; font-weight:400; color:#bdcfc4; }
+ .app-shell .table-wrap .controls.cash-controls > .action.danger, .app-shell .table-wrap .controls.cash-controls > .call-action, .app-shell .table-wrap .controls.cash-controls > .action.primary { grid-row:2!important; }
+ .app-shell .table-wrap .controls.cash-controls > .raise-control { grid-row:3!important; }
+ .app-shell .table-wrap .controls.cash-controls > .hint-action { grid-row:4!important; }
+ .app-shell .table-wrap .controls.tournament-controls > .tournament-decision-clock { grid-row:2!important; }
+ .app-shell .table-wrap .controls.tournament-controls > .action.danger, .app-shell .table-wrap .controls.tournament-controls > .call-action, .app-shell .table-wrap .controls.tournament-controls > .action.primary { grid-row:3!important; }
+ .app-shell .table-wrap .controls.tournament-controls > .raise-control { grid-row:4!important; }
+ .app-shell .table-wrap .controls.tournament-controls > .hint-action { grid-row:5!important; }
+}
