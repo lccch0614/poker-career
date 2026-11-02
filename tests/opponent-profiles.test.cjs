@@ -31,3 +31,15 @@ assert.equal(noted.note, '喜歡翻牌前加注');
 assert.equal(updateOpponentNote(noted, 'x'.repeat(200)).note.length, 160);
 assert.equal(updateOpponentNote(noted, '').note, '');
 assert.equal(restoreOpponentProfiles({ 'ai:1': { note: 1 } })['ai:1'].note, '');
+
+// Single-table tournament observations and notes remain separate from the same Cash seat.
+const cash = updateOpponentNote(undefined, 'Cash 備註');
+let sng = updateOpponentNote(undefined, '單桌賽備註');
+sng = recordOpponentProfile(sng, 'sng-table-1', tracker, true, false);
+const both = restoreOpponentProfiles(JSON.parse(JSON.stringify({ 'ai:1': cash, 'sng:1': sng })));
+assert.equal(both['ai:1'].note, 'Cash 備註');
+assert.equal(both['ai:1'].hands, 0);
+assert.equal(both['sng:1'].note, '單桌賽備註');
+assert.equal(both['sng:1'].hands, 1);
+assert.equal(recordOpponentProfile(both['sng:1'], 'sng-table-1', tracker, true, false).hands, 1);
+assert.equal(restoreOpponentProfiles({ 'sng:8': sng })['sng:8'], undefined);
