@@ -124,3 +124,14 @@ export function recordOpponentProfile(previous: OpponentProfile | undefined, han
     sawFlopHands: current.sawFlopHands + Number(tracker.sawFlop), showdownHands: current.showdownHands + Number(sawShowdown),
     showdownWins: current.showdownWins + Number(sawShowdown && wonShowdown), lastHandKey: handKey, note: current.note ?? "" };
 }
+
+// MTT identities are scoped to one tournament, independent of changing seats.
+export function restoreMttNotes(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const notes: Record<string, string> = {};
+  for (let id = 1; id < 200; id++) {
+    const note = (value as Record<string, unknown>)[String(id)];
+    if (typeof note === "string" && note) notes[String(id)] = note.slice(0, 160);
+  }
+  return notes;
+}

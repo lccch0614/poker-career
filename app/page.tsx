@@ -6,7 +6,7 @@ import { icmCallThreshold } from "./icm";
 import { bestScore, buildSidePots, compareScore, completeBoard, type Card, type Suit } from "./poker-engine";
 import { getPreflopAdvice, getTablePosition, positionOpenPercent, type TablePosition } from "./preflop-strategy";
 import { RANGE_POSITIONS, RANGE_RANKS, handsForPosition, positionRangePresets, rangeCell, rangePercent, rangePreset, restoreHandFilter, shouldAutoFold, wasAutoFolded, type HandFilter } from "./hand-filter";
-import { emptyHandTracker, emptySessionStats, settlePlayerSession, statPercent, trackPreflopAction, restoreOpponentProfiles, recordOpponentProfile, updateOpponentNote, type OpponentProfile, type PlayerHandTracker, type PlayerSessionStats } from "./session-stats";
+import { emptyHandTracker, emptySessionStats, settlePlayerSession, statPercent, trackPreflopAction, restoreOpponentProfiles, restoreMttNotes, recordOpponentProfile, updateOpponentNote, type OpponentProfile, type PlayerHandTracker, type PlayerSessionStats } from "./session-stats";
 import { TOURNAMENT_BLINDS, TOURNAMENT_SPEEDS, handsUntilBlindUp, payoutShares, potsWithBigBlindAnte, prizeForPlace, recordTournamentFinishes, tournamentBigBlindAnte, tournamentBlinds, tournamentCanContinue, tournamentLevel, tournamentPhase, tournamentStandings, type TournamentFinish, type TournamentSpeed } from "./tournament";
 import { AOF_BIG_BLINDS, CASH_BIG_BLINDS, TOURNAMENT_ENTRIES, aofContinuationStake, buyAofLife, careerStakeRisk, cashCannotRebuy, closeAof, closeCash, newCareerWallet, openAof, openCash, openTournament, rebuyCash, restoreCareerWallet, settleTournament, type CareerWallet, type CareerStakeRisk } from "./career-bankroll";
 import { MTT_BACKGROUND_INTERVAL_MS, MTT_ENTRIES, MTT_LEVEL_MS, MTT_PAID, completeMttBatch, completeMttRound, isMttField, mttAverage, mttClockTick, mttElapsed, mttLevel, mttPayoutShares, mttPrize, mttRemaining, mttStandings, newMttField, rebalanceMttField, restoreMttField, type MttField, type MttHighlight } from "./mtt-field";
@@ -66,6 +66,7 @@ type SavedPokerState = {
   career?: CareerWallet; lobbyCashBb?: number; lobbyTournamentEntry?: number; lobbyAofBb?: number;
   mtt?: MttField; lobbyMtt?: boolean;
   mttSessions?: PlayerSessionStats[];
+  mttNotes?: Record<string, string>;
   opponentProfiles?: Record<string, OpponentProfile>;
   tournamentClock?: TournamentDecisionClock | null;
 };
@@ -1949,6 +1950,7 @@ export default function Home() {
   const [selectedMttHighlight, setSelectedMttHighlight] = useState<string | null>(null);
   const mttClockActiveRef = useRef<boolean | null>(null);
   const [mttSessions, setMttSessions] = useState<PlayerSessionStats[] | null>(null);
+  const [mttNotes, setMttNotes] = useState<Record<string, string>>({});
   const [raiseTo, setRaiseTo] = useState(2.5);
   const [raiseDraft, setRaiseDraft] = useState<string | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("hard");
@@ -2055,6 +2057,7 @@ export default function Home() {
     setLobbyMtt(saved.lobbyMtt ?? false);
     setMtt(isMttField(saved.mtt) ? restoreMttField(saved.mtt) : null);
     setMttSessions(isMttField(saved.mtt) && Array.isArray(saved.mttSessions) && saved.mttSessions.length === MTT_ENTRIES ? saved.mttSessions : null);
+    setMttNotes(isMttField(saved.mtt) ? restoreMttNotes(saved.mttNotes) : {});
     setTournamentClock(restoreDecisionClock(saved.tournamentClock));
     setDifficulty(saved.difficulty);
     setSessions(saved.sessions);
@@ -2290,6 +2293,7 @@ export default function Home() {
       lobbyMtt,
       mtt: mtt ?? undefined,
       mttSessions: mttSessions ?? undefined,
+      mttNotes,
       tournamentClock,
       difficulty,
       sessions,
@@ -2350,7 +2354,7 @@ export default function Home() {
     const onPageHide = () => { window.clearTimeout(timer); void flush(true); };
     window.addEventListener("pagehide", onPageHide);
     return () => { window.clearTimeout(timer); window.removeEventListener("pagehide", onPageHide); };
-  }, [restoreReady, persistenceReady, game, started, hasActiveTable, gameMode, lobbyGameMode, tournamentSpeed, lobbyTournamentSpeed, career, lobbyCashBb, lobbyTournamentEntry, lobbyAofBb, lobbySize, lobbyMtt, mtt, mttSessions, tournamentClock, difficulty, sessions, opponentProfiles, coachReviews, profitHistory, handHistory, studyMode, handFilter, aof, aofOpen, saveConflict]);
+  }, [restoreReady, persistenceReady, game, started, hasActiveTable, gameMode, lobbyGameMode, tournamentSpeed, lobbyTournamentSpeed, career, lobbyCashBb, lobbyTournamentEntry, lobbyAofBb, lobbySize, lobbyMtt, mtt, mttSessions, mttNotes, tournamentClock, difficulty, sessions, opponentProfiles, coachReviews, profitHistory, handHistory, studyMode, handFilter, aof, aofOpen, saveConflict]);
 
   const heroHand = useMemo(() => game.board.length >= 3 ? HAND_LABEL[bestScore([...hero.hole, ...game.board])[0]] : "", [hero.hole, game.board]);
   const isTournament = gameMode === "tournament";
@@ -2568,6 +2572,7 @@ export default function Home() {
     setClockNow(Date.now());
     setMttHighlightsOpen(false);
     setMttSessions(tournament && lobbyMtt ? Array.from({ length: MTT_ENTRIES }, () => emptySessionStats()) : null);
+    setMttNotes({});
     setTournamentClock(tournament ? newDecisionClock("", 90_000, Date.now()) : null);
     setGameMode(lobbyGameMode);
     setTournamentSpeed(lobbyTournamentSpeed);
@@ -2628,6 +2633,8 @@ export default function Home() {
   const selectedStats = sessions[selectedSeat];
   const selectedCareerKey = selectedSeat > 0 && !game.mttSeatIds ? `${isTournament ? "sng" : "ai"}:${selectedSeat}` : null;
   const selectedCareerProfile = selectedCareerKey ? opponentProfiles[selectedCareerKey] : undefined;
+  const selectedMttId = selectedSeat > 0 ? game.mttSeatIds?.[selectedSeat] : undefined;
+  const selectedMttNoteKey = Number.isInteger(selectedMttId) && selectedMttId! > 0 && selectedMttId! < MTT_ENTRIES ? String(selectedMttId) : null;
   const percent = (part: number, total = selectedStats.hands) => statPercent(part, total);
   const coachScore = session.decisions ? Math.round(session.coachPoints / session.decisions) : 0;
   const coachLetter = coachScore >= 90 ? "A" : coachScore >= 80 ? "B" : coachScore >= 68 ? "C" : coachScore >= 55 ? "D" : session.decisions ? "F" : "—";
@@ -2911,10 +2918,11 @@ export default function Home() {
           return <button className={`roster-row ${game.turn === index ? "current" : ""} ${selectedSeat === index ? "selected-stat" : ""}`} key={player.id} onClick={() => setSelectedSeat(index)}><span><i>{index === 0 ? "你" : index}</i>{player.name}</span><span className="row-stats"><small>V {statPercent(stats.vpipHands, stats.hands)}% · P {statPercent(stats.pfrHands, stats.hands)}% · 3B {statPercent(stats.threeBetHands, stats.threeBetOpportunities)}%</small><b>{fmt(isTournament ? player.stack : player.stack + player.streetBet)}{isTournament ? ` 籌碼 · ${fmt(player.stack / (game.bigBlind ?? 1))}BB` : ` BB · R${MAX_REBUYS - game.rebuysUsed[index]}`}</b></span></button>;
         })}</section>
         <section className="session-panel">
-          <div className="panel-title"><h2>SESSION · {PLAYER_NAMES[selectedSeat]}</h2><button onClick={() => { setSessions(PLAYER_NAMES.slice(0, tableSize).map(() => emptySessionStats())); setCoachReviews([]); setProfitHistory([]); }}>全部重設</button></div>
+          <div className="panel-title"><h2>SESSION · {game.players[selectedSeat]?.name ?? PLAYER_NAMES[selectedSeat]}</h2><button onClick={() => { setSessions(PLAYER_NAMES.slice(0, tableSize).map(() => emptySessionStats())); setCoachReviews([]); setProfitHistory([]); }}>全部重設</button></div>
           {selectedSeat !== 0 && <div className="ai-profile"><div className="ai-profile-mark">{selectedSeat}</div><div><small>對手傾向</small><b>{selectedProfile}</b><span>{selectedStats.hands} 手樣本 · 建議至少 20 手</span></div></div>}
           {selectedCareerKey && <div className="coach-card opponent-card" aria-label="對手長期觀察"><span>長期觀察 · {isTournament ? "跨單桌賽" : "跨 Cash 牌桌"}</span><p>{selectedCareerProfile ? `${selectedCareerProfile.hands} 手 · VPIP ${statPercent(selectedCareerProfile.vpipHands, selectedCareerProfile.hands)}% · PFR ${statPercent(selectedCareerProfile.pfrHands, selectedCareerProfile.hands)}% · 3-bet ${statPercent(selectedCareerProfile.threeBetHands, selectedCareerProfile.threeBetOpportunities)}%` : "由本次更新後開始記錄；樣本愈多，參考價值愈高。"}</p></div>}
           {selectedCareerKey && <label className="opponent-note"><span>個人備註 · {isTournament ? "單桌賽" : "Cash"} · 自動保存</span><textarea aria-label={`${game.players[selectedSeat].name} 個人備註`} maxLength={160} placeholder="例如：翻牌前喜歡加注" value={selectedCareerProfile?.note ?? ""} onChange={event => { const value = event.target.value; const key = selectedCareerKey; setOpponentProfiles(previous => ({ ...previous, [key]: updateOpponentNote(previous[key], value) })); }} /><small>{(selectedCareerProfile?.note ?? "").length} / 160</small></label>}
+          {selectedMttNoteKey && <label className="opponent-note"><span>個人備註 · 本場多桌賽 · 轉桌後保留</span><textarea aria-label={`${game.players[selectedSeat].name} 個人備註`} maxLength={160} placeholder="例如：翻牌前喜歡加注" value={mttNotes[selectedMttNoteKey] ?? ""} onChange={event => { const value = event.target.value.slice(0, 160); const key = selectedMttNoteKey; setMttNotes(previous => { const next = { ...previous }; if (value) next[key] = value; else delete next[key]; return next; }); }} /><small>{(mttNotes[selectedMttNoteKey] ?? "").length} / 160 · 自動保存</small></label>}
           <div className="stats-grid">
             <div><span>手數</span><b>{selectedStats.hands}</b></div><div><span>盈虧</span><b className={selectedStats.profit >= 0 ? "positive" : "negative"}>{selectedStats.profit >= 0 ? "+" : ""}{fmt(selectedStats.profit)} {isTournament ? "籌碼" : "BB"}</b></div>
             <div><span>VPIP</span><b>{percent(selectedStats.vpipHands)}%</b></div><div><span>PFR</span><b>{percent(selectedStats.pfrHands)}%</b></div>
