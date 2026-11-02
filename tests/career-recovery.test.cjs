@@ -35,3 +35,18 @@ assert.equal(aofContinuationStake(higherStake, 'stake-locked', 1), 5);
 higherStake = closeAof(higherStake, 'stake-locked', 0);
 assert.equal(aofContinuationStake(restored(higherStake), 'stake-locked', 1), 5);
 assert.equal(aofContinuationStake(higherStake, 'legacy', 2), 2);
+
+// Corrupt active stakes and missing paid rebuys cannot be restored.
+const cashActive = openCash(newCareerWallet(), 'safe-cash', 1);
+assert.throws(() => restoreCareerWallet({ ...cashActive, cash: { ...cashActive.cash, bb: -1 } }), /Cash session invalid/);
+assert.throws(() => restoreCareerWallet({ ...cashActive, cash: { ...cashActive.cash, bb: 2 } }), /Cash session invalid/);
+assert.throws(() => restoreCareerWallet({ ...cashActive, cash: { ...cashActive.cash, buyInsPaid: 2 } }), /Cash session invalid/);
+const tournamentActive = openTournament(newCareerWallet(), 'safe-tournament', 50, 8);
+assert.throws(() => restoreCareerWallet({ ...tournamentActive, tournament: { ...tournamentActive.tournament, entry: 250 } }), /Tournament session invalid/);
+assert.throws(() => restoreCareerWallet({ ...tournamentActive, tournament: { ...tournamentActive.tournament, tableSize: 9 } }), /Tournament session invalid/);
+const aofActive = openAof(newCareerWallet(), 'safe-aof', 1);
+assert.throws(() => restoreCareerWallet({ ...aofActive, aof: { ...aofActive.aof, bb: -1 } }), /AOF session invalid/);
+assert.throws(() => restoreCareerWallet({ ...aofActive, aof: { ...aofActive.aof, livesPaid: 2 } }), /AOF session invalid/);
+assert.deepEqual(restored(cashActive), cashActive);
+assert.deepEqual(restored(tournamentActive), tournamentActive);
+assert.deepEqual(restored(aofActive), aofActive);
