@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -167,3 +167,19 @@ postflop = act(postflop, 0, 'checkcall');
 postflop = act(postflop, 1, 'raise', 1);
 assert.equal(postflop.turn, 0); // A genuine all-in wager must be answered.
 assert.equal(forcedRunoutReady(postflop), false);
+
+// Running twice splits the contested pot: EV must not depend on board order.
+const firstWin = [card(2,'c'), card(3,'d'), card(8,'h'), card(14,'c'), card(9,'s')];
+const secondWin = [card(2,'c'), card(3,'d'), card(8,'h'), card(13,'c'), card(10,'s')];
+const evBase = newHand([20, 20], 0, 190, () => .29);
+const evSplit = { ...evBase, board: firstWin, runoutBoards: [firstWin, secondWin],
+  startingStacks: [20, 20], settledBets: [20, 20], allInBoard: firstWin.slice(0, 3), allInCap: 20,
+  players: evBase.players.map((p, i) => ({ ...p, stack: 20, folded: false, allIn: true,
+    hole: i === 0 ? [card(14,'s'), card(14,'h')] : [card(13,'s'), card(13,'h')] })) };
+const forwardEv = allInEvDelta(evSplit);
+const reverseEv = allInEvDelta({ ...evSplit, board: secondWin, runoutBoards: [secondWin, firstWin] });
+assert.equal(forwardEv.hadAllIn, true);
+assert.ok(Math.abs(forwardEv.adjustedDelta - reverseEv.adjustedDelta) < 1e-9);
+// Legacy saves with no runout list retain the single-board result.
+assert.equal(allInEvDelta({ ...evSplit, runoutBoards: undefined }).adjustedDelta,
+  allInEvDelta({ ...evSplit, runoutBoards: [firstWin] }).adjustedDelta);
