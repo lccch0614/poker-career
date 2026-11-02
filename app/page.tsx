@@ -638,7 +638,10 @@ function allInEvDelta(game: Game) {
     }, 0);
   };
 
-  const actualPayout = heroPayout(game.board);
+  // Each run receives an equal share of each pot; compare the estimate with
+  // the actual average across all boards, not just the first run.
+  const boards = game.runoutBoards?.length ? game.runoutBoards : [game.board];
+  const actualPayout = boards.reduce((sum, board) => sum + heroPayout(board), 0) / boards.length;
   const missing = 5 - game.allInBoard.length;
   let expectedPayout = actualPayout;
   if (missing > 0) {
