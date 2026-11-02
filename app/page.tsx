@@ -128,6 +128,17 @@ function makeDeck(rng: () => number = Math.random) {
 function cardKey(card: Card) { return `${card.rank}${card.suit}`; }
 function canAct(seat: Seat) { return !seat.folded && !seat.allIn && seat.stack > 0; }
 function potTotal(game: Game) { return game.players.reduce((sum, player) => sum + player.totalBet, 0); }
+// With no opponent able to wager further, run out once the remaining player has matched every live bet.
+function forcedRunoutReady(game: Game): boolean {
+  if (game.finished || game.runoutPending) return false;
+  const live = game.players.filter(player => !player.folded);
+  if (live.length < 2) return false;
+  const actors = live.filter(canAct);
+  if (actors.length === 0) return true;
+  if (actors.length !== 1) return false;
+  const actor = actors[0];
+  return actor.streetBet + 1e-8 >= Math.max(0, ...live.filter(player => player !== actor).map(player => player.streetBet));
+}
 // A short all-in requires a response but does not by itself reopen raising.
 // The existing hand timeline also lets old saves recover the same rights.
 function mayRaise(game: Game, actor: number): boolean {
@@ -400,7 +411,7 @@ function finishAction(game: Game, actor: number): Game {
   if (alive.length === 1) return awardUncontested(game, alive[0]);
   const pending = game.pending.map((needed, index) => needed && canAct(game.players[index]));
   const next = { ...game, pending };
-  if (!pending.some(Boolean)) return advanceStreet(next);
+  if (forcedRunoutReady(next) || !pending.some(Boolean)) return advanceStreet(next);
   return { ...next, turn: findNext(game.players, actor, (_, index) => pending[index]) };
 }
 
@@ -1232,12 +1243,11 @@ function aofHandHighlights(game: Game, livesBefore: number[], livesAfter: number
 
 function aofAct(state: AofState, actor: number | null, jam: boolean): AofState {
   const before = state.game;
-  if (before.finished || before.turn !== actor) return state;
+  if (before.finished || (actor === null ? !forcedRunoutReady(before) : before.turn !== actor)) return state;
   const stats = state.stats.map(s => ({ ...s }));
   let game: Game;
   if (actor === null) {
-    if (before.players.filter(player => !player.folded).length < 2 || before.players.some(canAct)) return state;
-    game = showdown(before);
+    game = advanceStreet(before);
   } else {
     const facing = aofFacingAllIn(before,actor);
     const s = stats[actor];
@@ -1424,7 +1434,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
     return () => { media.removeEventListener("change",update); void audioRef.current?.close(); };
   }, []);
   useEffect(() => {
-    if (game.finished || game.turn !== null || game.players.some(canAct) || game.players.filter(player => !player.folded).length < 2) return;
+    if (!forcedRunoutReady(game)) return;
     onChange(aofAct(state, null, false));
   }, [state, game, onChange]);
   useEffect(() => {
@@ -2140,8 +2150,8 @@ export default function Home() {
   }, [timedTurnActive, tournamentTurnKey, tournamentClock?.remainingMs]);
 
   useEffect(() => {
-    if (!restoreReady || !started || aofOpen || game.finished || game.runoutPending || game.turn !== null || game.players.some(canAct) || game.players.filter(player => !player.folded).length < 2) return;
-    setGame(previous => !previous.finished && !previous.runoutPending && previous.turn === null && !previous.players.some(canAct) && previous.players.filter(player => !player.folded).length >= 2 ? showdown(previous) : previous);
+    if (!restoreReady || !started || aofOpen || !forcedRunoutReady(game)) return;
+    setGame(previous => forcedRunoutReady(previous) ? advanceStreet(previous) : previous);
   }, [restoreReady, started, aofOpen, game]);
 
   useEffect(() => {
