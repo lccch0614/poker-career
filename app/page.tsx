@@ -54,6 +54,7 @@ type HandRecord = {
   id: string; handNo: number; completedAt: number; tableSize: number; favourite: boolean;
   heroHole: Card[]; playerHoles: Card[][]; finalFolded: boolean[]; board: Card[];
   winners: number[]; message: string; potSummary: string[]; frames: HandFrame[];
+  runoutBoards?: Card[][];
   decisions: CoachReview[]; aiDecisions?: AiStudyDecision[]; actualProfit: number; allInEvProfit: number; unit?: "BB" | "籌碼";
 };
 type SavedPokerState = {
@@ -1670,6 +1671,7 @@ function buildHandRecord(game: Game, decisions: CoachReview[], mode: GameMode): 
     winners: [...game.winners],
     message: game.message,
     potSummary: [...game.potSummary],
+    runoutBoards: game.runoutBoards?.map(board => board.map(card => ({ ...card }))),
     frames: game.timeline.map(frame => ({ ...frame, board: [...frame.board], players: frame.players.map(player => ({ ...player })) })),
     decisions: [...decisions].sort((a, b) => a.actionId - b.actionId),
     aiDecisions: [...(game.aiDecisions ?? [])],
@@ -1911,6 +1913,7 @@ function HandReviewModal({ history, selectedId, replayIndex, studyMode, onStudyM
           <div className="replay-action"><span>{STREET_LABEL[frame.street]} · 步驟 {replayIndex + 1}/{selected.frames.length}</span><b>{frame.action}</b></div>
           <div className={`replay-seats seats-${selected.tableSize}`}>{frame.players.map((player, index) => <div key={player.id} className={`${player.folded ? "folded" : ""} ${frame.actor === index ? "acting" : ""}`}><span>{player.name}</span><b>{fmt(player.stack)} {selected.unit ?? "單位未記錄"}</b><small>{player.lastAction || "—"}</small></div>)}</div>
           {lastFrame && <div className="replay-showdown">{selected.playerHoles.map((hole, index) => index > 0 && (studyMode || !selected.finalFolded[index]) ? <div key={index} className={selected.finalFolded[index] ? "study-mucked" : ""}><b>{frame.players[index]?.name ?? PLAYER_NAMES[index]}{selected.finalFolded[index] ? " · 已棄牌" : ""}</b><span>{hole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</span></div> : null)}</div>}
+          {lastFrame && <section className="replay-results" aria-label="底池結算詳情"><h3>底池結算</h3>{selected.runoutBoards && selected.runoutBoards.length > 1 && <div className="runout-boards" aria-label="多次發牌結果">{selected.runoutBoards.map((board, index) => <div key={index}><b>第 {index + 1} 次</b><span>{board.map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}{selected.potSummary?.length ? selected.potSummary.map((line, index) => <p key={index}>{line}</p>) : <p>此牌局未保存底池明細。</p>}</section>}
           <div className="replay-nav"><button disabled={replayIndex <= 0} onClick={() => onReplay(Math.max(0, replayIndex - 1))}>← 上一步</button><button disabled={replayIndex >= selected.frames.length - 1} onClick={() => onReplay(Math.min(selected.frames.length - 1, replayIndex + 1))}>下一步 →</button></div>
           <section className="decision-review"><div className="panel-title"><h3>你嘅決定</h3><span>行動紀錄</span></div>{selected.decisions.length ? selected.decisions.map(decision => <div key={decision.id} className="decision-row"><div><span>{STREET_LABEL[decision.street]}</span><b>{decisionActionLabel(decision)}</b></div></div>) : <p className="decision-empty">呢手未有記錄玩家行動。</p>}</section>
           {studyMode && <section className="study-review"><div className="panel-title"><h3>AI決策解釋</h3><span>完手後揭示</span></div>{selected.aiDecisions?.length ? selected.aiDecisions.map(decision => <div className="study-decision" key={decision.id}><div><span>{STREET_LABEL[decision.street]} · {PLAYER_NAMES[decision.actor]}</span><b>{decision.title}</b><p>{decision.detail}</p><small>{decision.range}</small></div><div>{decision.metrics.map(metric => <i key={metric}>{metric}</i>)}</div></div>) : <p className="decision-empty">舊牌局未有AI決策資料；新完成嘅牌局會自動記錄。</p>}</section>}

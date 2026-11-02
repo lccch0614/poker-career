@@ -390,3 +390,8 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 }
 
 .opponent-note{display:block;margin:10px 0;color:#b8c8be;font-size:12px}.opponent-note span,.opponent-note small{display:block}.opponent-note textarea{display:block;box-sizing:border-box;width:100%;min-height:72px;margin-top:6px;padding:9px;border:1px solid #456758;border-radius:8px;background:#0b1c16;color:#edf7ef;resize:vertical;font:16px/1.4 system-ui,sans-serif}.opponent-note textarea:focus{outline:2px solid #d8af5d;outline-offset:2px}.opponent-note small{text-align:right;margin-top:3px;color:#9aaba2}
+
+.replay-results { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #091611; }
+.replay-results h3 { margin: 0 0 6px; font-size: 12px; color: #e8cb88; }
+.replay-results p { margin: 5px 0; color: #cbd4d0; font-size: 10px; line-height: 1.5; }
+.replay-results .runout-boards b { flex: 0 0 auto; font-size: 10px; }
