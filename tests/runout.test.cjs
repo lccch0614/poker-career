@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, showdown, shouldPlayStandardCinematic, StandardShowdown };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, showdown, shouldPlayStandardCinematic, StandardShowdown } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -146,3 +146,24 @@ for (const runs of [1,2,3]) {
   assert.ok(!result.message.includes('另有分池'));
   assert.equal(result.showdownAwards.filter(award => award.refund).reduce((sum, award) => sum + award.amount, 0), 20);
 }
+
+// One player with chips cannot bet into opponents who are already all-in.
+let matched = { ...newHand([2, .4], 0, 100, () => .33), allowRunouts: true };
+assert.equal(matched.turn, 0);
+assert.equal(forcedRunoutReady(matched), true); // SB .5 already covers the short BB .4.
+let choice = advanceStreet(matched);
+assert.equal(choice.runoutPending, true);
+assert.equal(choice.finished, false);
+let final = showdown(choice, 2);
+assert.ok(Math.abs(final.players.reduce((sum, p) => sum + p.stack, 0) - 2.4) < 1e-8);
+let owes = { ...newHand([2, 1], 0, 101, () => .33), allowRunouts: true };
+assert.equal(forcedRunoutReady(owes), false); // SB must decide whether to call the BB.
+owes = act(owes, 0, 'checkcall');
+assert.equal(owes.runoutPending, true);
+assert.equal(owes.finished, false);
+let postflop = bettingFixture([20, 1, 20], 0, 1);
+postflop = { ...postflop, players: postflop.players.map((p, i) => i === 2 ? { ...p, folded: true } : p) };
+postflop = act(postflop, 0, 'checkcall');
+postflop = act(postflop, 1, 'raise', 1);
+assert.equal(postflop.turn, 0); // A genuine all-in wager must be answered.
+assert.equal(forcedRunoutReady(postflop), false);

@@ -288,3 +288,12 @@ for (const variant of ['run', 'standard']) {
 }
 const ordinaryAof = newAof();
 assert.equal(aofAct(ordinaryAof, null, false), ordinaryAof);
+
+const oneAble = newAof('standard');
+oneAble.game = newHand([2, .4, 0, 0], 0, 92, () => .31, [0,0,0,0], 'one-able', .25);
+assert.equal(oneAble.game.turn, 0);
+const resolvedOneAble = aofAct(oneAble, null, false);
+assert.equal(resolvedOneAble.game.finished, true);
+assert.equal(resolvedOneAble.runHands, 1);
+assert.equal(resolvedOneAble.stats[0].pushOpportunities, 0);
+assert.ok(Math.abs(resolvedOneAble.game.players.reduce((sum, p) => sum + p.stack, 0) - 2.4) < 1e-8);
