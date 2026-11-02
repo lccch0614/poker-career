@@ -130,3 +130,19 @@ for (const tournament of [undefined, []]) {
   assert.ok(Math.abs(result.showdownAwards[0].amount - 1.2) < 1e-8);
   assert.ok(Math.abs(result.showdownAwards[1].amount - 1.2) < 1e-8);
 }
+
+// A returned unmatched wager is not a pot win, even when it exceeds the winner's award.
+const card = (rank, suit) => ({ rank, suit });
+let refundOnly = newHand([30, 10], 0, 91, () => .29);
+refundOnly = { ...refundOnly, board: [card(2,'c'),card(3,'d'),card(4,'h'),card(8,'s'),card(9,'c')],
+  players: refundOnly.players.map((p, i) => ({ ...p, stack: 0, totalBet: [30,10][i], streetBet: [30,10][i], allIn: true,
+    hole: i === 0 ? [card(13,'s'),card(13,'h')] : [card(14,'s'),card(14,'h')] })) };
+for (const runs of [1,2,3]) {
+  const result = showdown(refundOnly, runs);
+  assert.deepEqual(result.winners, [1]);
+  assert.deepEqual(result.players.map(p => p.stack), [20,20]);
+  assert.ok(result.potSummary.some(line => line.includes('退回未被跟注籌碼')));
+  assert.match(result.message, /AI 1.*贏得 20BB/);
+  assert.ok(!result.message.includes('另有分池'));
+  assert.equal(result.showdownAwards.filter(award => award.refund).reduce((sum, award) => sum + award.amount, 0), 20);
+}
