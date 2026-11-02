@@ -253,6 +253,7 @@ function showdown(game: Game, runs = 1): Game {
   const scores = allScores[0];
   const layers = potsWithBigBlindAnte(game.players.map(player => player.totalBet), game.players.map(player => player.folded), game.bb, game.bigBlindAntePaid ?? 0);
   const awards = game.players.map(() => 0);
+  const contestedAwards = game.players.map(() => 0);
   const settledBets = game.players.map(player => player.totalBet);
   const summaries: string[] = [];
   const showdownAwards: ShowdownAward[] = [];
@@ -264,19 +265,24 @@ function showdown(game: Game, runs = 1): Game {
         const comparison = compareScore(boardScores[index] ?? [-1], boardScores[winners[0]] ?? [-1]);
         if (comparison > 0) winners = [index]; else if (comparison === 0) winners.push(index);
       }
-      winners.forEach(index => { awards[index] += layer.amount / runs / winners.length; });
-      showdownAwards.push({ run, layer: layerIndex, amount: layer.amount / runs, winners: [...winners], share: layer.amount / runs / winners.length, refund: layer.contributors.length === 1 });
-      summaries.push(`${runs > 1 ? `第 ${run + 1} 次 · ` : ""}${layerIndex === 0 ? "主池" : `邊池 ${layerIndex}`} ${fmt(layer.amount / runs)}BB：${winners.map(index => game.players[index].name).join("、")}`);
+      const refund = layer.contributors.length === 1;
+      winners.forEach(index => {
+        const share = layer.amount / runs / winners.length;
+        awards[index] += share;
+        if (!refund) contestedAwards[index] += share;
+      });
+      showdownAwards.push({ run, layer: layerIndex, amount: layer.amount / runs, winners: [...winners], share: layer.amount / runs / winners.length, refund });
+      summaries.push(`${runs > 1 ? `第 ${run + 1} 次 · ` : ""}${refund ? "退回未被跟注籌碼" : layerIndex === 0 ? "主池" : `邊池 ${layerIndex}`} ${fmt(layer.amount / runs)}BB：${winners.map(index => game.players[index].name).join("、")}`);
     });
   });
   const players = game.players.map((player, index) => ({
     ...player, stack: player.stack + awards[index], streetBet: 0, totalBet: 0,
     lastAction: awards[index] > 0 ? `+${fmt(awards[index])}BB` : player.lastAction,
   }));
-  const winners = awards.map((amount, index) => amount > 0 ? index : -1).filter(index => index >= 0);
-  const lead = winners.sort((a, b) => awards[b] - awards[a])[0];
+  const winners = contestedAwards.map((amount, index) => amount > 0 ? index : -1).filter(index => index >= 0);
+  const lead = winners.sort((a, b) => contestedAwards[b] - contestedAwards[a])[0];
   const leadHand = lead === undefined || runs > 1 ? "" : `以${HAND_LABEL[(scores[lead] ?? [0])[0]]}`;
-  const message = lead === undefined ? "牌局結束" : `${players[lead].name}${leadHand}贏得 ${fmt(awards[lead])}BB${winners.length > 1 ? "（另有分池）" : ""}`;
+  const message = lead === undefined ? "牌局結束" : `${players[lead].name}${leadHand}贏得 ${fmt(contestedAwards[lead])}BB${winners.length > 1 ? "（另有分池）" : ""}`;
   const tournamentFinishes = game.tournamentFinishes ? recordTournamentFinishes(game.tournamentFinishes, game.startingStacks, players.map(player => player.stack), game.handNo) : undefined;
   return addLog({ ...game, ...completed, runoutPending: false, runoutBoards: boards, players, settledBets, tournamentFinishes, street: "showdown", pending: players.map(() => false), turn: null, finished: true, winners, potSummary: summaries, showdownAwards }, message);
 }
@@ -1538,7 +1544,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
         {outs[contenders.indexOf(index)]?.behind && <span className="aof-outs-badge">{outs[contenders.indexOf(index)].win.length} 反超 outs · {outs[contenders.indexOf(index)].tie.length} 追平</span>}
         {revealing && step === 1 && !p.folded && <span className="aof-chip-travel">{fmt(game.settledBets[index] ?? 0)}BB</span>}
         {paid && cinematic && !reduced && winners.includes(index) && <span className="aof-award-flight" key={`award-${game.handNo}-${index}`} aria-hidden="true"><i /><i /><i /></span>}
-        {winners.includes(index) && <span className="aof-payout">收池 +{fmt(p.stack-(game.startingStacks[index]-game.settledBets[index]))}BB</span>}
+        {winners.includes(index) && <span className="aof-payout">收池 +{fmt(game.showdownAwards ? game.showdownAwards.filter(award => !award.refund && award.winners.includes(index)).reduce((sum, award) => sum + award.share, 0) : p.stack-(game.startingStacks[index]-game.settledBets[index]))}BB</span>}
       </div>)}
       <div className="aof-centre"><b>{foldReveal ? "娛樂揭牌" : paid ? "本手結束" : `底池 ${fmt(view.pot)}BB`}</b><div className="aof-board">{[0,1,2,3,4].map(i => <div key={`${game.handNo}-${i}-${!!displayBoard[i]}-${foldReveal}`} className={`${displayBoard[i] ? "aof-flip" : ""} ${paid && !foldReveal && displayBoard[i] && winningKeys.has(cardKey(displayBoard[i])) ? "aof-card-used" : ""}`}><CardView card={displayBoard[i]} mini /></div>)}</div><span>{foldReveal ? "假設牌面 · 不計入結果" : revealing ? stageLabel : `第 ${game.handNo} 手`}</span></div>
     </section>
