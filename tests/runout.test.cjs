@@ -240,3 +240,16 @@ for (const ante of [0, 1]) {
   assert.match(result.potSummary[1], ante ? /退回未被跟注籌碼 8 籌碼/ : /退回未被跟注籌碼 8BB/);
   assert.ok(Math.abs(result.players.reduce((sum, p) => sum + p.stack, 0) - 300) < 1e-9);
 }
+
+// Three-way split main pot and two-way side pot, including a folded contributor.
+const tieBase = newHand([10, 20, 30, 30], 0, 240, () => .37);
+const royalBoard = [card(10,'s'),card(11,'s'),card(12,'s'),card(13,'s'),card(14,'s')];
+const tied = { ...tieBase, board: royalBoard, players: tieBase.players.map((p,i) => ({ ...p, stack: 0, totalBet: [10,20,30,30][i], streetBet: [10,20,30,30][i], folded: i === 3, allIn: i !== 3, hole: [[card(2,'c'),card(3,'d')],[card(4,'c'),card(5,'d')],[card(6,'c'),card(7,'d')],[card(8,'c'),card(9,'d')]][i] })) };
+const tieResult = showdown(tied);
+assert.deepEqual(tieResult.showdownAwards.map(a => a.amount), [40,30,20]);
+assert.deepEqual(tieResult.showdownAwards.map(a => a.winners), [[0,1,2],[1,2],[2]]);
+assert.ok(Math.abs(tieResult.players[0].stack - 40/3) < 1e-9);
+assert.ok(Math.abs(tieResult.players[1].stack - (40/3 + 15)) < 1e-9);
+assert.ok(Math.abs(tieResult.players[2].stack - (40/3 + 35)) < 1e-9);
+assert.equal(tieResult.players[3].stack, 0);
+assert.ok(Math.abs(tieResult.players.reduce((sum,p) => sum+p.stack,0)-90) < 1e-9);
