@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const ts = require('typescript');
 require.extensions['.ts'] = (mod, filename) => mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
-const { emptyHandTracker, recordOpponentProfile, restoreOpponentProfiles, updateOpponentNote, statPercent } = require('../app/session-stats.ts');
+const { emptyHandTracker, recordOpponentProfile, restoreOpponentProfiles, restoreMttNotes, updateOpponentNote, statPercent } = require('../app/session-stats.ts');
 const tracker = { ...emptyHandTracker(), vpip: true, pfr: true, threeBet: true, threeBetOpportunity: true, sawFlop: true };
 let profile = recordOpponentProfile(undefined, 'cash-a-1', tracker, true, true);
 assert.equal(profile.hands, 1);
@@ -43,3 +43,13 @@ assert.equal(both['sng:1'].note, '單桌賽備註');
 assert.equal(both['sng:1'].hands, 1);
 assert.equal(recordOpponentProfile(both['sng:1'], 'sng-table-1', tracker, true, false).hands, 1);
 assert.equal(restoreOpponentProfiles({ 'sng:8': sng })['sng:8'], undefined);
+
+// Tournament notes follow opponent IDs across seat changes and survive save/restore.
+const mttNotes = restoreMttNotes(JSON.parse(JSON.stringify({ '1': '緊手', '123': '喜歡加注', '0': 'hero', '200': 'invalid', '7': 'x'.repeat(200), '8': 42 })));
+assert.equal(mttNotes['123'], '喜歡加注');
+assert.equal(mttNotes[String([0, 123, 1][1])], mttNotes[String([0, 1, 123][2])]);
+assert.equal(mttNotes['7'].length, 160);
+assert.equal(mttNotes['0'], undefined);
+assert.equal(mttNotes['200'], undefined);
+assert.equal(mttNotes['8'], undefined);
+assert.deepEqual(restoreMttNotes(undefined), {});
