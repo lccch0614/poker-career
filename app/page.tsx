@@ -1879,6 +1879,10 @@ function ScenarioTrainer({ plan, onClose }: { plan: PracticePlan | null; onClose
   </div>;
 }
 
+function opponentHoleVisible(finished: boolean, street: Street, folded: boolean, studyMode: boolean) {
+  return finished && (studyMode || street === "showdown" && !folded);
+}
+
 function HandReviewModal({ history, selectedId, replayIndex, studyMode, onStudyMode, onSelect, onReplay, onToggleFavourite, onClose }: {
   history: HandRecord[]; selectedId: string | null; replayIndex: number;
   studyMode: boolean; onStudyMode: () => void;
@@ -1912,7 +1916,7 @@ function HandReviewModal({ history, selectedId, replayIndex, studyMode, onStudyM
           </div>
           <div className="replay-action"><span>{STREET_LABEL[frame.street]} · 步驟 {replayIndex + 1}/{selected.frames.length}</span><b>{frame.action}</b></div>
           <div className={`replay-seats seats-${selected.tableSize}`}>{frame.players.map((player, index) => <div key={player.id} className={`${player.folded ? "folded" : ""} ${frame.actor === index ? "acting" : ""}`}><span>{player.name}</span><b>{fmt(player.stack)} {selected.unit ?? "單位未記錄"}</b><small>{player.lastAction || "—"}</small></div>)}</div>
-          {lastFrame && <div className="replay-showdown">{selected.playerHoles.map((hole, index) => index > 0 && (studyMode || !selected.finalFolded[index]) ? <div key={index} className={selected.finalFolded[index] ? "study-mucked" : ""}><b>{frame.players[index]?.name ?? PLAYER_NAMES[index]}{selected.finalFolded[index] ? " · 已棄牌" : ""}</b><span>{hole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</span></div> : null)}</div>}
+          {lastFrame && <div className="replay-showdown">{selected.playerHoles.map((hole, index) => index > 0 && opponentHoleVisible(true, frame.street, selected.finalFolded[index], studyMode) ? <div key={index} className={selected.finalFolded[index] ? "study-mucked" : ""}><b>{frame.players[index]?.name ?? PLAYER_NAMES[index]}{selected.finalFolded[index] ? " · 已棄牌" : ""}</b><span>{hole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</span></div> : null)}</div>}
           {lastFrame && <section className="replay-results" aria-label="底池結算詳情"><h3>底池結算</h3>{selected.runoutBoards && selected.runoutBoards.length > 1 && <div className="runout-boards" aria-label="多次發牌結果">{selected.runoutBoards.map((board, index) => <div key={index}><b>第 {index + 1} 次</b><span>{board.map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}{selected.potSummary?.length ? selected.potSummary.map((line, index) => <p key={index}>{line}</p>) : <p>此牌局未保存底池明細。</p>}</section>}
           <div className="replay-nav"><button disabled={replayIndex <= 0} onClick={() => onReplay(Math.max(0, replayIndex - 1))}>← 上一步</button><button disabled={replayIndex >= selected.frames.length - 1} onClick={() => onReplay(Math.min(selected.frames.length - 1, replayIndex + 1))}>下一步 →</button></div>
           <section className="decision-review"><div className="panel-title"><h3>你嘅決定</h3><span>行動紀錄</span></div>{selected.decisions.length ? selected.decisions.map(decision => <div key={decision.id} className="decision-row"><div><span>{STREET_LABEL[decision.street]}</span><b>{decisionActionLabel(decision)}</b></div></div>) : <p className="decision-empty">呢手未有記錄玩家行動。</p>}</section>
@@ -2650,7 +2654,7 @@ export default function Home() {
   const selectedVpip = statPercent(selectedStats.vpipHands, selectedStats.hands);
   const selectedPfr = statPercent(selectedStats.pfrHands, selectedStats.hands);
   const selectedProfile = selectedStats.hands < 5 ? "樣本累積中" : selectedVpip < 20 ? "緊手型" : selectedVpip > 38 ? "鬆手型" : selectedPfr >= selectedVpip * 0.72 ? "主動進取" : "跟注偏多";
-  const revealedAi = game.finished ? game.players.filter((player, index) => index !== 0 && (studyMode || !player.folded)) : [];
+  const revealedAi = game.finished ? game.players.filter((player, index) => index !== 0 && opponentHoleVisible(true, game.street, player.folded, studyMode)) : [];
   const latestProfit = profitHistory[profitHistory.length - 1];
   const pendingRebuys = !isTournament && game.finished ? game.players.map((player, index) => player.stack <= 0 && game.rebuysUsed[index] < MAX_REBUYS ? index : -1).filter(index => index >= 0) : [];
   const selectedRebuys = game.rebuysUsed[selectedSeat];
@@ -2892,7 +2896,7 @@ export default function Home() {
           {game.players.map((player, index) => {
             const slot = SEAT_SLOTS[tableSize][index];
             return <div key={player.id} className={`table-seat seat-pos-${slot} ${player.folded ? "folded" : ""} ${player.allIn ? "all-in" : ""} ${game.turn === index ? "acting" : ""} ${visibleMotion?.foldedSeat === index ? "standard-seat-fold" : ""} ${visibleMotion?.winners.includes(index) ? "standard-seat-win" : ""}`}>
-            {index !== 0 && <div className={`mini-hole ${game.finished && (studyMode || !player.folded) ? "revealed" : ""} ${visibleMotion?.deal ? "standard-dealing" : ""}`}>{player.hole.map((card, cardIndex) => <CardView key={cardIndex} card={card} mini hidden={!game.finished || player.folded && !studyMode} />)}</div>}
+            {index !== 0 && <div className={`mini-hole ${opponentHoleVisible(game.finished, game.street, player.folded, studyMode) ? "revealed" : ""} ${visibleMotion?.deal ? "standard-dealing" : ""}`}>{player.hole.map((card, cardIndex) => <CardView key={cardIndex} card={card} mini hidden={!opponentHoleVisible(game.finished, game.street, player.folded, studyMode)} />)}</div>}
             <div className={`avatar ${index === 0 ? "hero-avatar" : ""}`}>{index === 0 ? "你" : index}</div>
             <div className="seat-copy"><span>{index === 0 || isTournament && mtt ? player.name : <>{player.name} · {personality(index).name}<em className="seat-personality"> · {personality(index).style}</em></>}{(player.stack > 0 || !isTournament && game.rebuysUsed[index] < MAX_REBUYS) && <em className="position-tag">{displayPosition(game, index)}</em>}{!isTournament && <em aria-label={`剩餘 ${MAX_REBUYS - game.rebuysUsed[index]} 次 Re-buy`} className={`rebuy-tag ${game.rebuysUsed[index] >= MAX_REBUYS ? "depleted" : ""}`}>R{MAX_REBUYS - game.rebuysUsed[index]}</em>}</span><b>{player.stack > 0 ? `${fmt(player.stack)}${isTournament ? " 籌碼" : " BB"}` : !game.finished && player.allIn ? "ALL-IN" : !isTournament && game.rebuysUsed[index] < MAX_REBUYS ? "待補 100BB" : "OUT"}</b>{isTournament && player.stack > 0 && <em className={`tournament-depth ${player.stack / (game.bigBlind ?? 1) < 10 ? "short" : ""}`}>{fmt(player.stack / (game.bigBlind ?? 1))} BB</em>}<small>{player.lastAction}</small></div>
             {game.button === index && <span className="dealer">D</span>}
