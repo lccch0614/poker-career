@@ -108,3 +108,25 @@ checked = act(checked, 1, 'raise', .5);
 checked = act(checked, 2, 'checkcall');
 assert.equal(checked.turn, 0);
 assert.equal(mayRaise(checked, 0), true);
+
+// A short big blind remains an all-in contribution, not a smaller live blind.
+for (const tournament of [undefined, []]) {
+  let blind = newHand([20, 20, .4], 0, 80, () => .39, [0,0,0], 'short-blind', 0, .5, 1, 0, tournament);
+  assert.equal(blind.bb, 2);
+  assert.equal(blind.players[2].streetBet, .4);
+  assert.equal(blind.players[2].allIn, true);
+  assert.equal(blind.currentBet, 1);
+  assert.equal(blind.turn, 0);
+  assert.equal(blind.minRaise, 1);
+  blind = act(blind, 0, 'checkcall');
+  assert.equal(blind.players[0].streetBet, 1);
+  assert.equal(blind.turn, 1);
+  blind = act(blind, 1, 'checkcall');
+  assert.equal(blind.street, 'flop');
+  assert.ok(Math.abs(blind.players.reduce((total, player) => total + player.stack + player.totalBet, 0) - 40.4) < 1e-8);
+  const result = showdown(blind);
+  assert.ok(Math.abs(result.players.reduce((total, player) => total + player.stack, 0) - 40.4) < 1e-8);
+  assert.equal(result.showdownAwards.length, 2);
+  assert.ok(Math.abs(result.showdownAwards[0].amount - 1.2) < 1e-8);
+  assert.ok(Math.abs(result.showdownAwards[1].amount - 1.2) < 1e-8);
+}
