@@ -49,7 +49,8 @@ type CoachReview = { id: string; grade: CoachGrade; score: number; title: string
 type AiStudyDecision = { id: string; actor: number; street: Street; actionId: number; action: string; title: string; detail: string; range: string; metrics: string[] };
 type GtoHint = { handNo: number; actionId: number; action: string; size: string; title: string; detail: string; metrics: string[]; evs: ActionEv[] };
 type ProfitPoint = { hand: number; actual: number; allInEv: number; hadAllIn: boolean };
-type StandardTableMotion = { id: number; tableId: string; handNo: number; deal: boolean; boardFrom: number | null; foldedSeat: number | null; chipSeat: number | null; winners: number[] };
+type SettlementFlight = { seat: number; amount: number; refund: boolean; layer: number; run: number; order: number };
+type StandardTableMotion = { id: number; tableId: string; handNo: number; deal: boolean; boardFrom: number | null; foldedSeat: number | null; chipSeat: number | null; winners: number[]; awards: SettlementFlight[] };
 type HandRecord = {
   id: string; handNo: number; completedAt: number; tableSize: number; favourite: boolean;
   heroHole: Card[]; playerHoles: Card[][]; finalFolded: boolean[]; board: Card[];
@@ -263,7 +264,11 @@ function awardUncontested(game: Game, winner: number) {
   players[winner].lastAction = `贏得 ${fmt(won)}${unit}`;
   const tournamentFinishes = game.tournamentFinishes ? recordTournamentFinishes(game.tournamentFinishes, game.startingStacks, players.map(player => player.stack), game.handNo) : undefined;
   const potSummary = [`底池 ${fmt(won)}${unit}：${players[winner].name}`, ...(refund > 0 ? [`退回未被跟注籌碼 ${fmt(refund)}${unit}：${players[winner].name}`] : [])];
-  return addLog({ ...game, players, settledBets, tournamentFinishes, pending: players.map(() => false), turn: null, finished: true, winners: [winner], potSummary }, `${players[winner].name} 贏得 ${fmt(won)}${unit}`);
+  const showdownAwards: ShowdownAward[] = [
+    { run: 0, layer: 0, amount: won, winners: [winner], share: won, refund: false },
+    ...(refund > 0 ? [{ run: 0, layer: 1, amount: refund, winners: [winner], share: refund, refund: true }] : []),
+  ];
+  return addLog({ ...game, players, settledBets, showdownAwards, tournamentFinishes, pending: players.map(() => false), turn: null, finished: true, winners: [winner], potSummary }, `${players[winner].name} 贏得 ${fmt(won)}${unit}`);
 }
 
 function showdown(game: Game, runs = 1): Game {
@@ -311,6 +316,11 @@ function showdown(game: Game, runs = 1): Game {
   const message = lead === undefined ? "牌局結束" : `${players[lead].name}${leadHand}贏得 ${fmt(contestedAwards[lead])}${game.tournamentFinishes ? " 籌碼" : "BB"}${winners.length > 1 ? "（另有分池）" : ""}`;
   const tournamentFinishes = game.tournamentFinishes ? recordTournamentFinishes(game.tournamentFinishes, game.startingStacks, players.map(player => player.stack), game.handNo) : undefined;
   return addLog({ ...game, ...completed, runoutPending: false, runoutBoards: boards, players, settledBets, tournamentFinishes, street: "showdown", pending: players.map(() => false), turn: null, finished: true, winners, potSummary: summaries, showdownAwards }, message);
+}
+
+// Animation is a projection of settled awards and never changes chip balances.
+function settlementFlights(awards: ShowdownAward[] | undefined): SettlementFlight[] {
+  return (awards ?? []).flatMap((award, order) => award.winners.map(seat => ({ seat, amount: award.share, refund: award.refund, layer: award.layer, run: award.run, order })));
 }
 
 // Presentation is deliberately transient: the game has already settled and remains authoritative.
@@ -1546,7 +1556,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
   return <main className={`aof-shell aof-theme-${theme} ${reduced ? "aof-reduced" : ""}`}>
     <header className="aof-header"><div><span>ALL-IN OR FOLD · {standard ? "標準牌桌" : boss ? "BOSS RUN" : "三命 RUN"}</span><h1>AOF · 4 人 · 8BB BUY-IN</h1></div><button onClick={onExit}>返回標準模式</button></header>
     <p className="aof-rules">{standard ? "0.5 / 1BB＋每人0.25BB Ante · 8BB 買入 · 籌碼跨手延續 · 對手爆倉後補入；你爆倉後可重新買入。" : "0.5 / 1BB＋每人0.25BB Ante · 籌碼跨手延續 · 每條命8BB · 爆倉先扣命，用盡三命先出局。"}{saveStatus}</p>
-    <section className="aof-bankroll" aria-label="AOF 資金狀態"><div className="aof-bankroll-title"><div><span>CAREER BANKROLL</span><strong>{legacy ? "舊版練習局" : `盲注 ${fmt(careerStake / 2)} / ${fmt(careerStake)} C`}</strong></div><small>{saveStatus}</small></div><div className="aof-bankroll-grid"><div><span>可用 Bankroll</span><b>{fmt(shownBalance)} C</b></div><div><span>桌上可用籌碼</span><b>{!walletOpen && !revealing && !legacy ? "已兌回" : `${fmt(view.players[0].stack)} BB`}</b><small>{legacy ? "練習籌碼" : !walletOpen && !revealing ? "—" : `約 ${fmt(currentStackValue)} C`}</small></div><div><span>本 Run 已投入</span><b>{legacy ? "—" : `${fmt(runInvested)} C`}</b></div><div><span>{walletOpen ? "完手可兌回" : "已兌回"}</span><b>{legacy ? "—" : revealing ? "結算中" : walletOpen ? paid ? `${fmt(currentStackValue)} C` : "完手後計算" : `${fmt(runReturned)} C`}</b></div></div><div className="aof-bankroll-footer"><span>{legacy ? "舊版練習局不計 Bankroll；開始新 Run 後生效。" : paid ? `本 Run 盈虧 ${runNet >= 0 ? "+" : ""}${fmt(runNet)} C` : "牌局進行中 · 籌碼投入底池後，完手先計算盈虧"}</span>{canCashOut && onCashOut && <button type="button" onClick={onCashOut}>結束 Run · 兌回 {fmt(currentStackValue)} C</button>}</div>{nextLifeNeeded && !legacy && <p className="aof-life-notice">下一手補命需 {fmt(nextLifeCost)} C · {careerBalance >= nextLifeCost ? "按下一手時扣款" : "餘額不足，無法補命"}</p>}</section>{bankrollMessage && <p className="bankroll-message" role="alert">{bankrollMessage}</p>}
+    <details className="aof-bankroll" aria-label="AOF 資金狀態"><summary className="aof-bankroll-summary"><span>Bankroll <b>{fmt(shownBalance)} C</b></span><span>桌上 <b>{!walletOpen && !revealing && !legacy ? "已兌回" : `${fmt(view.players[0].stack)} BB`}</b></span><span>詳細資料</span></summary><div className="aof-bankroll-title"><div><span>CAREER BANKROLL</span><strong>{legacy ? "舊版練習局" : `盲注 ${fmt(careerStake / 2)} / ${fmt(careerStake)} C`}</strong></div><small>{saveStatus}</small></div><div className="aof-bankroll-grid"><div><span>可用 Bankroll</span><b>{fmt(shownBalance)} C</b></div><div><span>桌上可用籌碼</span><b>{!walletOpen && !revealing && !legacy ? "已兌回" : `${fmt(view.players[0].stack)} BB`}</b><small>{legacy ? "練習籌碼" : !walletOpen && !revealing ? "—" : `約 ${fmt(currentStackValue)} C`}</small></div><div><span>本 Run 已投入</span><b>{legacy ? "—" : `${fmt(runInvested)} C`}</b></div><div><span>{walletOpen ? "完手可兌回" : "已兌回"}</span><b>{legacy ? "—" : revealing ? "結算中" : walletOpen ? paid ? `${fmt(currentStackValue)} C` : "完手後計算" : `${fmt(runReturned)} C`}</b></div></div><div className="aof-bankroll-footer"><span>{legacy ? "舊版練習局不計 Bankroll；開始新 Run 後生效。" : paid ? `本 Run 盈虧 ${runNet >= 0 ? "+" : ""}${fmt(runNet)} C` : "牌局進行中 · 籌碼投入底池後，完手先計算盈虧"}</span>{canCashOut && onCashOut && <button type="button" onClick={onCashOut}>結束 Run · 兌回 {fmt(currentStackValue)} C</button>}</div>{nextLifeNeeded && !legacy && <p className="aof-life-notice">下一手補命需 {fmt(nextLifeCost)} C · {careerBalance >= nextLifeCost ? "按下一手時扣款" : "餘額不足，無法補命"}</p>}</details>{bankrollMessage && <p className="bankroll-message" role="alert">{bankrollMessage}</p>}
     <div className="aof-run-strip"><div><span>RUN</span><b>第 {state.runNo ?? 1} 局</b></div><div><span>本局手數</span><b>{state.runHands ?? 0}</b></div><div><span>連勝</span><b>{state.streak ?? 0}</b></div><div><span>娛樂 XP</span><b>{xp}</b></div></div>
     <details className="aof-settings"><summary>動畫、音效及重新開始</summary><div className="aof-playback" aria-label="AOF動畫設定">
       <button aria-pressed={!fast} onClick={() => setFast(false)}>電影節奏</button><button aria-pressed={fast} onClick={() => setFast(true)}>快速</button>
@@ -1584,7 +1594,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
       : paid && state.runFinished ? <div className="aof-actions"><button className="aof-jam" onClick={next}>{standard ? "重新買入 8BB · 開新局" : state.bossLastResult === "complete" ? "完成 Boss Run · 返回三命 Run" : state.bossActive && state.bossLastResult === "win" ? "下一關 · 回復三條命" : state.bossActive ? "重試本關 · 回復三條命" : `開始第 ${(state.runNo ?? 1)+1} 局 · 回復三條命`}</button></div>
       : paid && foldEligible && !foldReveal ? <div className="aof-actions"><button onClick={() => onChange({ ...state, foldReveal: true })}>✦ 娛樂揭牌</button><button className="aof-jam" onClick={next}>{nextLifeNeeded && !legacy ? careerBalance >= nextLifeCost ? `補命 ${fmt(nextLifeCost)} C · 下一手` : "餘額不足 · 結束 Run" : "下一手 · 籌碼延續"}</button></div>
       : paid ? <div className="aof-actions"><button className="aof-jam" onClick={next}>{nextLifeNeeded && !legacy ? careerBalance >= nextLifeCost ? `補命 ${fmt(nextLifeCost)} C · 下一手` : "餘額不足 · 結束 Run" : "下一手 · 籌碼延續"}</button></div>
-      : <div className="aof-actions"><button disabled={game.turn !== 0} onClick={() => move(false)}>Fold 棄牌</button><button className="aof-jam" disabled={game.turn !== 0} onClick={() => move(true)}>{facingAllIn && !canRaiseAllIn ? "Call All-in" : "All-in"} · {fmt(game.players[0].stack)}BB</button><button disabled={game.turn !== 0} onClick={() => setHint(!hint)}>AOF 提示</button></div>}
+      : <div className="aof-actions"><button disabled={game.turn !== 0} onClick={() => move(false)}>Fold 棄牌</button><button className="aof-jam" disabled={game.turn !== 0} onClick={() => move(true)}>{game.turn !== 0 ? "等待其他玩家" : `${facingAllIn && !canRaiseAllIn ? "Call All-in" : "All-in"} · ${fmt(game.players[0].stack)}BB`}</button><button disabled={game.turn !== 0} onClick={() => setHint(!hint)}>AOF 提示</button></div>}
     {!standard && <section className={`aof-boss-panel ${boss ? "active" : ""}`} aria-label="AOF Boss Run">
       <div className="aof-boss-head"><div><span>BOSS RUN</span><h2>{boss ? `第 ${(state.bossStage ?? 0)+1} 關 · ${boss.name}` : "挑戰三位 Boss"}</h2></div><strong>{state.bossCycles ?? 0} 冠</strong></div>
       <div className="aof-boss-map">{AOF_BOSSES.map((item,index) => <div key={item.id} className={`${boss ? index < (state.bossStage ?? 0) ? "cleared" : "" : (state.bossTrophies ?? []).includes(item.id) ? "cleared" : ""} ${boss && index === (state.bossStage ?? 0) ? "current" : ""}`}><i>{index+1}</i><span>{item.name}</span><small>{item.title}</small></div>)}</div>
@@ -1611,7 +1621,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
 }
 
 function CardView({ card, hidden = false, mini = false }: { card?: Card; hidden?: boolean; mini?: boolean }) {
-  if (hidden) return <div className={`card card-back ${mini ? "mini-card" : ""}`} aria-label="隱藏的牌"><span>8</span></div>;
+  if (hidden) return <div className={`card card-back ${mini ? "mini-card" : ""}`} role="img" aria-label="隱藏的牌"><span aria-hidden="true">8</span></div>;
   if (!card) return <div className={`card card-empty ${mini ? "mini-card" : ""}`} aria-hidden="true" />;
   const red = card.suit === "h" || card.suit === "d";
   return <div className={`card ${red ? "red" : "black"} ${mini ? "mini-card" : ""}`} aria-label={`${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`}><b>{RANK_LABEL[card.rank] ?? card.rank}</b><span>{SUIT_GLYPH[card.suit]}</span></div>;
@@ -2005,8 +2015,9 @@ export default function Home() {
   // A long lobby can leave the browser scrolled below the table when a timed
   // tournament starts. Position the table as the view enters, before paint.
   useLayoutEffect(() => {
-    if (started && !aofOpen && window.matchMedia("(max-width: 700px) and (orientation: portrait)").matches) {
-      document.querySelector(".table-wrap .felt")?.scrollIntoView({ block: "start", behavior: "instant" });
+    if (window.matchMedia("(max-width: 700px) and (orientation: portrait)").matches) {
+      if (aofOpen) document.querySelector(".aof-shell")?.scrollIntoView({ block: "start", behavior: "instant" });
+      else if (started) document.querySelector(".table-wrap .felt")?.scrollIntoView({ block: "start", behavior: "instant" });
     }
   }, [started, aofOpen]);
   const [persistenceReady, setPersistenceReady] = useState(false);
@@ -2226,9 +2237,11 @@ export default function Home() {
     const foldedSeat = !deal ? game.players.findIndex((seat, index) => !previous.players[index]?.folded && seat.folded) : -1;
     const chipSeat = !deal ? game.players.findIndex((seat, index) =>
       Math.max(seat.totalBet, game.settledBets[index] ?? 0) > (previous.players[index]?.totalBet ?? 0) + 0.001 && !seat.folded) : -1;
-    const winners = !deal && !previous.finished && game.finished ? game.winners : [];
-    if (deal || boardFrom !== null || foldedSeat >= 0 || chipSeat >= 0 || winners.length) {
-      setTableMotion({ id: ++motionSerial.current, tableId: game.tableId, handNo: game.handNo, deal, boardFrom, foldedSeat: foldedSeat >= 0 ? foldedSeat : null, chipSeat: chipSeat >= 0 ? chipSeat : null, winners });
+    const settled = !deal && !previous.finished && game.finished;
+    const winners = settled ? game.winners : [];
+    const awards = settled ? settlementFlights(game.showdownAwards) : [];
+    if (deal || boardFrom !== null || foldedSeat >= 0 || chipSeat >= 0 || winners.length || awards.length) {
+      setTableMotion({ id: ++motionSerial.current, tableId: game.tableId, handNo: game.handNo, deal, boardFrom, foldedSeat: foldedSeat >= 0 ? foldedSeat : null, chipSeat: chipSeat >= 0 ? chipSeat : null, winners, awards });
     }
   }, [restoreReady, started, aofOpen, game]);
 
@@ -2890,7 +2903,7 @@ export default function Home() {
     <div className="three-mode-picker table-mode-picker" role="group" aria-label="切換遊戲模式">
       <button className={gameMode === "cash" ? "selected" : ""} onClick={() => openModeLobby("cash")}><b>Cash</b><small>100BB</small></button>
       <button className={gameMode === "tournament" ? "selected" : ""} onClick={() => openModeLobby("tournament")}><b>錦標賽</b><small>升盲</small></button>
-      <button onClick={enterAof}><b>AOF</b><small>娛樂模式</small></button>
+      <button onClick={() => chooseMode("aof")}><b>AOF</b><small>娛樂模式</small></button>
     </div>
     <div className="career-strip"><b>Bankroll {fmt(career.balance)} C</b><span>{isTournament ? tournamentEntry ? `報名 ${tournamentEntry} C · 獎池 ${tournamentPrizePool} C` : "舊版練習賽事" : career.transactions.some(tx => tx.id === `cash:${game.tableId}:buy-in`) ? `Cash BB ${cashStake} C · 100BB 買入 ${cashStake * 100} C` : "舊版練習桌"}</span></div>{bankrollMessage && <p className="bankroll-message" role="alert">{bankrollMessage}</p>}{saveStatus === "error" && <p className="bankroll-message" role="alert">{saveFailure || "本機同步失敗，請檢查網絡。"}</p>}
     <header className="topbar">
@@ -2925,13 +2938,13 @@ export default function Home() {
           {dealMotion && dealMotion.tableId === game.tableId && dealMotion.handNo === game.handNo && motionMode !== "off" && dealMotion.seats.map((index, order) => <div key={`deal-${dealMotion.id}-${index}`} className={`standard-deal-flight slot-${SEAT_SLOTS[tableSize][index]}`} aria-hidden="true" style={{ "--deal-delay": `${order * 35}ms` } as React.CSSProperties}><i /><i /></div>)}
           <div className="pot-chip"><span>底池</span><b>{fmt(pot)}{isTournament ? "" : " BB"}</b></div>
           {visibleMotion?.chipSeat !== null && visibleMotion?.chipSeat !== undefined && <div key={`chip-${visibleMotion.id}`} className={`standard-chip-flight slot-${SEAT_SLOTS[tableSize][visibleMotion.chipSeat]}`} aria-hidden="true"><i /><i /><i /></div>}
-          {visibleMotion?.winners.map(index => <div key={`award-${visibleMotion.id}-${index}`} className={`standard-pot-award slot-${SEAT_SLOTS[tableSize][index]}`} aria-hidden="true"><i /><i /><i /></div>)}
+          {visibleMotion?.awards.map((award, index) => <div key={`award-${visibleMotion.id}-${index}`} className={`standard-pot-award slot-${SEAT_SLOTS[tableSize][award.seat]}`} aria-hidden="true" style={{ "--award-delay": `${(visibleMotion.chipSeat === null ? 100 : 550) + award.order * (motionMode === "fast" ? 300 : 700)}ms` } as React.CSSProperties}><i /><i /><i /><b>{(game.runoutBoards?.length ?? 1) > 1 ? `第 ${award.run + 1} 次 · ` : ""}{award.refund ? "退回" : award.layer ? `邊池 ${award.layer}` : "主池"} +{fmt(award.amount)}</b></div>)}
           <div className="board">{[0,1,2,3,4].map(index => <div key={index} className={visibleMotion?.boardFrom !== null && visibleMotion?.boardFrom !== undefined && index >= visibleMotion.boardFrom && !!game.board[index] ? "standard-board-reveal" : ""} style={{ "--card-delay": `${Math.max(0, index - (visibleMotion?.boardFrom ?? 0)) * 70}ms` } as React.CSSProperties}><CardView card={game.board[index]} /></div>)}</div>
           <div className={`hero-hole ${hero.folded ? "standard-hole-folded" : ""} ${visibleMotion?.deal ? "standard-dealing" : ""} ${visibleMotion?.foldedSeat === 0 ? "standard-fold-action" : ""}`}>{hero.hole.map((card, index) => <CardView key={index} card={card} />)}</div>
         </div>
 
         <div className="status-line"><div><span className={game.turn === 0 ? "turn-dot active" : "turn-dot"} />{thinking ? `${thinking} 正在思考…` : game.message}</div>{heroHand && !game.finished && <span className="hand-strength">目前：{heroHand}</span>}</div>
-        {!game.finished ? <><div className={`controls ${isTournament ? "tournament-controls" : "cash-controls"} ${game.turn !== 0 && !(quickFold && !isTournament && game.street === "preflop" && game.pending[0] && canAct(hero) && !queuedFold) ? "disabled" : ""}`}><div className="mobile-hero-summary" aria-label={`你的底牌 ${hero.hole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join("、")}；籌碼 ${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}`}><span className="mobile-hero-title">你嘅底牌</span><span className="mobile-hero-cards" aria-hidden="true">{hero.hole.map((card, index) => <CardView key={index} card={card} mini />)}</span><span className="mobile-hero-stack">{hero.folded ? "已棄牌" : `${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}`}<small>{heroHand && !hero.folded ? heroHand : game.turn === 0 ? "輪到你" : ""}</small></span></div>{isTournament && <div className={`tournament-decision-clock ${timedTurnActive && tournamentClock?.remainingMs !== undefined && tournamentClock.remainingMs <= 5000 ? "urgent" : ""}`} role="timer" aria-label="行動倒數"><div><b>{timedTurnActive && tournamentClock?.turnKey === tournamentTurnKey ? Math.ceil(tournamentClock.remainingMs / 1000) : "—"} 秒</b><span>Time-bank 餘額 {Math.ceil((tournamentClock?.bankMs ?? 90_000) / 1000)} 秒</span></div><button disabled={!timedTurnActive || tournamentClock?.turnKey !== tournamentTurnKey || !!tournamentClock.extended || !tournamentClock.bankMs || !tournamentClock.remainingMs} onClick={() => setTournamentClock(previous => previous?.turnKey === tournamentTurnKey ? extendDecisionClock(previous) : previous)}>＋ 15 秒 Time-bank</button></div>}
+        {!game.finished ? <><div className={`controls ${isTournament ? "tournament-controls" : "cash-controls"} ${game.turn !== 0 && !(quickFold && !isTournament && game.street === "preflop" && game.pending[0] && canAct(hero) && !queuedFold) ? "disabled" : ""}`}><div className="mobile-hero-summary" aria-label={`你的底牌 ${hero.hole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join("、")}；籌碼 ${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}`}><span className="mobile-hero-title">你 · {displayPosition(game, 0)}</span><span className="mobile-hero-cards" aria-hidden="true">{hero.hole.map((card, index) => <CardView key={index} card={card} mini />)}</span><span className="mobile-hero-stack">{hero.folded ? "已棄牌" : `${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}`}<small>{heroHand && !hero.folded ? heroHand : game.turn === 0 ? "輪到你" : ""}</small></span></div>{isTournament && <div className={`tournament-decision-clock ${timedTurnActive && tournamentClock?.remainingMs !== undefined && tournamentClock.remainingMs <= 5000 ? "urgent" : ""}`} role="timer" aria-label="行動倒數"><div><b>{timedTurnActive && tournamentClock?.turnKey === tournamentTurnKey ? Math.ceil(tournamentClock.remainingMs / 1000) : "—"} 秒</b><span>Time-bank 餘額 {Math.ceil((tournamentClock?.bankMs ?? 90_000) / 1000)} 秒</span></div><button disabled={!timedTurnActive || tournamentClock?.turnKey !== tournamentTurnKey || !!tournamentClock.extended || !tournamentClock.bankMs || !tournamentClock.remainingMs} onClick={() => setTournamentClock(previous => previous?.turnKey === tournamentTurnKey ? extendDecisionClock(previous) : previous)}>＋ 15 秒 Time-bank</button></div>}
           <button className="action secondary danger" disabled={game.turn !== 0 && !(quickFold && !isTournament && game.street === "preflop" && game.pending[0] && canAct(hero) && !queuedFold)} onClick={() => { if (game.turn === 0) heroAction("fold"); else setQueuedFoldHand(queuedFoldKey); }}>{game.turn !== 0 && quickFold && !isTournament && game.street === "preflop" && game.pending[0] && canAct(hero) ? queuedFold ? "已預選棄牌" : "快速棄牌" : "棄牌"}</button>
           <button className="action secondary call-action" disabled={game.turn !== 0} onClick={() => { if (toCall >= hero.stack && toCall > 0 && !window.confirm(`確認 All-in 跟注？今次投入 ${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}。`)) return; heroAction("checkcall"); }}>{toCall > 0 ? `跟注 ${fmt(Math.min(toCall, hero.stack))}` : "過牌"}</button>
           <button className={`action hint-action ${visibleHint ? "hint-open" : ""}`} disabled={game.turn !== 0} onClick={() => setHint(visibleHint ? null : buildGtoHint(game))}>✦ AI 提示</button>

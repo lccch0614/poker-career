@@ -395,3 +395,62 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 .replay-results h3 { margin: 0 0 6px; font-size: 12px; color: #e8cb88; }
 .replay-results p { margin: 5px 0; color: #cbd4d0; font-size: 10px; line-height: 1.5; }
 .replay-results .runout-boards b { flex: 0 0 auto; font-size: 10px; }
+
+/* Keep seat identity above the sticky action dock on portrait phones. */
+@media(max-width:700px) and (orientation:portrait) {
+ .app-shell .seat-pos-0 { bottom: 92px; }
+ .app-shell .hero-hole { bottom: 158px; }
+ .app-shell .seat-copy span { font-size: 10px; }
+ .app-shell .seat-copy b { font-size: 11px; }
+ .app-shell .seat-pos { font-size: 9px; }
+}
+.aof-bankroll-summary { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:44px; cursor:pointer; color:#c5d9ce; font-size:12px; }
+.aof-bankroll-summary b { color:#ffe2a1; font-size:14px; }
+.aof-bankroll[open] .aof-bankroll-summary { margin-bottom:10px; border-bottom:1px solid #456455; }
+
+@media(max-width:700px) and (orientation:portrait) {
+ .app-shell .felt { min-height:440px; height:clamp(440px, 55dvh, 500px); }
+ .app-shell .seat-pos-0 { bottom:68px; }
+ .app-shell .seat-pos-1, .app-shell .seat-pos-7 { bottom:68px; }
+ .app-shell .hero-hole { bottom:125px; }
+ .app-shell .hero-hole .card { width:42px; height:58px; }
+ .app-shell .board { top:45%; }
+ .app-shell .standard-deal-flight.slot-0, .app-shell .standard-chip-flight.slot-0, .app-shell .standard-pot-award.slot-0 { --seat-y:80%; }
+ .app-shell .standard-deal-flight.slot-2, .app-shell .standard-chip-flight.slot-2, .app-shell .standard-pot-award.slot-2, .app-shell .standard-deal-flight.slot-6, .app-shell .standard-chip-flight.slot-6, .app-shell .standard-pot-award.slot-6 { --seat-y:39%; }
+}
+@media(max-width:700px) and (orientation:portrait) {
+ .app-shell .felt .mini-hole .mini-card { width:24px; height:34px; padding:2px; }
+ .app-shell .felt .mini-hole .mini-card b, .app-shell .felt .mini-hole .mini-card span { font-size:9px; }
+}
+@media(max-width:500px) and (orientation:portrait) {
+ main.aof-shell > .aof-table { height:440px; margin:8px 0; }
+ .aof-shell .aof-table .aof-centre { top:48%; }
+ .aof-shell .aof-table .aof-seat { padding:5px; }
+ .aof-shell .aof-table .aof-seat strong { margin:2px 0; }
+ .aof-shell .aof-table .aof-cards .mini-card { width:27px; height:37px; }
+ .aof-shell .aof-header { padding:8px 0; }
+ .aof-shell .aof-rules { margin:4px 0; font-size:12px; line-height:1.35; }
+}
+@media(max-width:360px) and (orientation:portrait) {
+ .app-shell .table-seat { min-width:70px; max-width:85px; gap:2px; padding:3px; }
+ .app-shell .avatar { width:24px; height:24px; flex-basis:24px; }
+}
+@media(max-width:500px) and (orientation:portrait) {
+ .aof-shell .aof-table .aof-seat-1, .aof-shell .aof-table .aof-seat-3 { top:90px; }
+}
+/* On short screens the full action dock cannot fit over the table without hiding seats. */
+@media(max-width:700px) and (orientation:portrait) and (max-height:700px) {
+ .app-shell .table-wrap .controls { position:relative; bottom:auto; }
+}
+@media(max-width:360px) and (orientation:portrait) {
+ .app-shell .seat-pos-2, .app-shell .seat-pos-6 { width:70px; min-width:70px; max-width:70px; }
+ .app-shell .seat-pos-2 .seat-copy, .app-shell .seat-pos-6 .seat-copy { min-width:0; overflow:hidden; }
+ .app-shell .seat-pos-2 .seat-copy span, .app-shell .seat-pos-6 .seat-copy span { overflow:hidden; text-overflow:ellipsis; }
+ .app-shell .board { gap:2px; }
+ .app-shell .board .card { width:27px; height:40px; padding:3px; }
+ .app-shell .board .card b, .app-shell .board .card span { font-size:12px; }
+}
+
+/* Keep the last bet and each settled pot/refund visually distinct. */
+.app-shell .standard-pot-award { opacity:0; animation-delay:var(--award-delay, 0ms); animation-fill-mode:forwards; }
+.app-shell .standard-pot-award b { position:absolute; top:-21px; left:50%; transform:translateX(-50%); white-space:nowrap; padding:2px 5px; border-radius:5px; background:#09241f; color:#ffe3a3; font:700 10px system-ui,sans-serif; }
