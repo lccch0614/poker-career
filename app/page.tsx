@@ -1021,7 +1021,7 @@ type AofHighlight = { id: string; hand: number; title: string; detail: string; t
 type AofBoss = { id: string; name: string; title: string; seat: number; style: string; pushDelta: number; callDelta: number };
 type AofCollectionEntry = { dealt: number; wins: number; lastHand: number; lastWinHand?: number };
 type AofState = {
-  revealStep?: number; game: Game; profits: ProfitPoint[];
+  variant?: "run" | "standard"; revealStep?: number; game: Game; profits: ProfitPoint[];
   stats: Array<{ hands: number; profit: number; pushes: number; calls: number; pushOpportunities: number; callOpportunities: number }>;
   lives?: number[]; runNo?: number; runHands?: number; runFinished?: boolean; foldReveal?: boolean; cashOutEarly?: boolean;
   xp?: number; streak?: number; bestStreak?: number; theme?: AofTheme; unlockedThemes?: AofTheme[]; highlights?: AofHighlight[];
@@ -1090,10 +1090,10 @@ function aofUnlocked(xp: number) {
   return AOF_THEMES.filter(theme => xp >= theme.unlock).map(theme => theme.id);
 }
 
-function newAof(): AofState {
+function newAof(variant: "run" | "standard" = "run"): AofState {
   const game = newHand([8,8,8,8], 0, 1, Math.random, [0,0,0,0], undefined, AOF_ANTE);
   return {
-    game, profits: [], lives: [3,3,3,3], runNo: 1, runHands: 0,
+    game, variant, profits: [], lives: variant === "standard" ? [1,1,1,1] : [3,3,3,3], runNo: 1, runHands: 0,
     runFinished: false, foldReveal: false, xp: 0, streak: 0, bestStreak: 0, theme: "emerald", unlockedThemes: ["emerald"], highlights: [],
     bossActive: false, bossStage: 0, bossTrophies: [], bossCycles: 0, collection: aofCollectDeal({},game.players[0].hole,game.handNo),
     stats: Array.from({ length: 4 }, () => ({ hands: 0, profit: 0, pushes: 0, calls: 0, pushOpportunities: 0, callOpportunities: 0 })),
@@ -1179,7 +1179,7 @@ function aofMoment(holes: Card[][], board: Card[], names: string[] = holes.map((
   return null;
 }
 
-function aofHandHighlights(game: Game, livesBefore: number[], livesAfter: number[]) {
+function aofHandHighlights(game: Game, livesBefore: number[], livesAfter: number[], standard = false) {
   const entries: AofHighlight[] = [];
   const contenders = game.players.map((player,index) => !player.folded ? index : -1).filter(index => index >= 0);
   if (game.board.length === 5 && contenders.length >= 2) {
@@ -1197,7 +1197,7 @@ function aofHandHighlights(game: Game, livesBefore: number[], livesAfter: number
     }
   }
   livesAfter.forEach((life,index) => {
-    if (life === 0 && livesBefore[index] > 0) entries.push({ id: `${game.handNo}-out-${index}`, hand: game.handNo, title: `${PLAYER_NAMES[index]} 出局`, detail: "三條命已全部用盡", tone: "red" });
+    if (life === 0 && livesBefore[index] > 0) entries.push({ id: `${game.handNo}-out-${index}`, hand: game.handNo, title: `${PLAYER_NAMES[index]} 出局`, detail: standard ? "籌碼已用盡" : "三條命已全部用盡", tone: "red" });
   });
   if (!entries.length) {
     const winner = game.winners[0];
@@ -1224,8 +1224,9 @@ function aofAct(state: AofState, actor: number, jam: boolean): AofState {
   const result = allInEvDelta(game);
   const last = state.profits.at(-1);
   const livesBefore = aofLives(state);
-  const lives = livesBefore.map((life,index) => game.startingStacks[index] > 0 && game.players[index].stack <= 0 ? Math.max(0,life-1) : life);
-  const runFinished = lives[0] === 0 || lives.filter(life => life > 0).length <= 1;
+  const standard = state.variant === "standard";
+  const lives = standard ? [game.players[0].stack > 0 ? 1 : 0, 1, 1, 1] : livesBefore.map((life,index) => game.startingStacks[index] > 0 && game.players[index].stack <= 0 ? Math.max(0,life-1) : life);
+  const runFinished = standard ? game.players[0].stack <= 0 : lives[0] === 0 || lives.filter(life => life > 0).length <= 1;
   const heroWon = game.winners.includes(0);
   const boss = aofBoss(state);
   let bossActive = state.bossActive ?? false;
@@ -1242,7 +1243,7 @@ function aofAct(state: AofState, actor: number, jam: boolean): AofState {
       else { bossLastResult = "win"; bossStage++; }
     } else bossLastResult = "loss";
   }
-  const highlights = aofHandHighlights(game,livesBefore,lives);
+  const highlights = aofHandHighlights(game,livesBefore,lives,standard);
   const specialPoints = highlights.filter(item => !["本手焦點","不戰而勝"].includes(item.title)).length*4;
   const bossBonus = bossLastResult === "complete" ? 25 : bossLastResult === "win" ? 12 : 0;
   const xp = (state.xp ?? 0) + 2 + (game.players[0].allIn ? 2 : 0) + (heroWon ? 2 : 0) + specialPoints + bossBonus;
@@ -1327,8 +1328,9 @@ function aofBestFive(cards: Card[]) {
 function aofNextHand(state: AofState): AofState {
   if (!state.game.finished) return state;
   const restart = state.runFinished ?? false;
-  const lives = restart ? [3,3,3,3] : aofLives(state);
-  const stacks = restart ? lives.map(life => life > 0 ? 8 : 0) : state.game.players.map((player,index) => player.stack > 0 ? player.stack : lives[index] > 0 ? 8 : 0);
+  const standard = state.variant === "standard";
+  const lives = standard ? [1,1,1,1] : restart ? [3,3,3,3] : aofLives(state);
+  const stacks = restart ? lives.map(life => life > 0 ? 8 : 0) : state.game.players.map((player,index) => player.stack > 0 ? player.stack : (standard && index > 0) || lives[index] > 0 ? 8 : 0);
   const completedBoss = restart && state.bossLastResult === "complete";
   const game = newHand(stacks,(state.game.button+1)%4,state.game.handNo+1,Math.random,[0,0,0,0],state.game.tableId,AOF_ANTE);
   return {
@@ -1356,7 +1358,7 @@ function aofRestartRun(state: AofState): AofState {
   const game = newHand([8,8,8,8],0,state.game.handNo+1,Math.random,[0,0,0,0],state.game.tableId,AOF_ANTE);
   const bossActive = state.bossActive ?? false;
   return {
-    ...state, game, lives: [3,3,3,3], runNo: (state.runNo ?? 1)+1, runHands: 0,
+    ...state, game, lives: state.variant === "standard" ? [1,1,1,1] : [3,3,3,3], runNo: (state.runNo ?? 1)+1, runHands: 0,
     runFinished: false, cashOutEarly: false, foldReveal: false, revealStep: undefined, streak: 0,
     bossActive, bossStage: bossActive ? state.bossStage ?? 0 : 0,
     bossLastResult: undefined, bossLastStage: undefined,
@@ -1370,6 +1372,7 @@ function aofWhatIfBoard(game: Game) {
 
 function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalance = 0, careerStake = 1, bankrollMessage = "", legacy = false, runInvested = 0, runReturned = 0, walletOpen = false }: { state: AofState; onChange: (state: AofState) => void; onExit: () => void; onCashOut?: () => void; saveStatus: string; careerBalance?: number; careerStake?: number; bankrollMessage?: string; legacy?: boolean; runInvested?: number; runReturned?: number; walletOpen?: boolean }) {
   const { game } = state;
+  const standard = state.variant === "standard";
   const view = aofPresentation(state);
   const { stats, revealing, step, lives } = view;
   const paid = game.finished && !revealing;
@@ -1431,8 +1434,8 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
   const next = () => { setHint(false); onChange(aofNextHand(state)); };
   const startBoss = () => { setHint(false); onChange(aofStartBossRun(state)); };
   const restartRun = () => {
-    const target = boss ? `${boss.name}呢一關` : "目前 AOF Run";
-    if (!window.confirm(`重新開始${target}？\n\n四位玩家會回復三條命並重新發牌；XP、統計、169 收藏、精華及 Boss 獎盃會保留。`)) return;
+    const target = standard ? "目前標準 AOF 牌桌" : boss ? `${boss.name}呢一關` : "目前 AOF Run";
+    if (!window.confirm(`重新開始${target}？\n\n${standard ? "目前籌碼會先兌回，再扣除新一次買入。" : "四位玩家會回復三條命並重新發牌；XP、統計、169 收藏、精華及 Boss 獎盃會保留。"}`)) return;
     setHint(false); onChange(aofRestartRun(state));
   };
   const advice = aofDecision(game, 0);
@@ -1479,8 +1482,8 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
   const nextLifeNeeded = paid && !state.runFinished && game.players[0].stack <= 0 && lives[0] > 0;
   const stageLabel = ["全押對決","翻開底牌","FLOP · 翻牌","TURN · 轉牌","RIVER · 河牌"][step] ?? "結果";
   return <main className={`aof-shell aof-theme-${theme} ${reduced ? "aof-reduced" : ""}`}>
-    <header className="aof-header"><div><span>ALL-IN OR FOLD · {boss ? "BOSS RUN" : "三命 RUN"}</span><h1>AOF · 4 人 · 8BB BUY-IN</h1></div><button onClick={onExit}>返回標準模式</button></header>
-    <p className="aof-rules">0.5 / 1BB＋每人0.25BB Ante · 籌碼跨手延續 · 每條命8BB · 爆倉先扣命，用盡三命先出局。{saveStatus}</p>
+    <header className="aof-header"><div><span>ALL-IN OR FOLD · {standard ? "標準牌桌" : boss ? "BOSS RUN" : "三命 RUN"}</span><h1>AOF · 4 人 · 8BB BUY-IN</h1></div><button onClick={onExit}>返回標準模式</button></header>
+    <p className="aof-rules">{standard ? "0.5 / 1BB＋每人0.25BB Ante · 8BB 買入 · 籌碼跨手延續 · 對手爆倉後補入；你爆倉後可重新買入。" : "0.5 / 1BB＋每人0.25BB Ante · 籌碼跨手延續 · 每條命8BB · 爆倉先扣命，用盡三命先出局。"}{saveStatus}</p>
     <section className="aof-bankroll" aria-label="AOF 資金狀態"><div className="aof-bankroll-title"><div><span>CAREER BANKROLL</span><strong>{legacy ? "舊版練習局" : `盲注 ${fmt(careerStake / 2)} / ${fmt(careerStake)} C`}</strong></div><small>{saveStatus}</small></div><div className="aof-bankroll-grid"><div><span>可用 Bankroll</span><b>{fmt(shownBalance)} C</b></div><div><span>桌上可用籌碼</span><b>{!walletOpen && !revealing && !legacy ? "已兌回" : `${fmt(view.players[0].stack)} BB`}</b><small>{legacy ? "練習籌碼" : !walletOpen && !revealing ? "—" : `約 ${fmt(currentStackValue)} C`}</small></div><div><span>本 Run 已投入</span><b>{legacy ? "—" : `${fmt(runInvested)} C`}</b></div><div><span>{walletOpen ? "完手可兌回" : "已兌回"}</span><b>{legacy ? "—" : revealing ? "結算中" : walletOpen ? paid ? `${fmt(currentStackValue)} C` : "完手後計算" : `${fmt(runReturned)} C`}</b></div></div><div className="aof-bankroll-footer"><span>{legacy ? "舊版練習局不計 Bankroll；開始新 Run 後生效。" : paid ? `本 Run 盈虧 ${runNet >= 0 ? "+" : ""}${fmt(runNet)} C` : "牌局進行中 · 籌碼投入底池後，完手先計算盈虧"}</span>{canCashOut && onCashOut && <button type="button" onClick={onCashOut}>結束 Run · 兌回 {fmt(currentStackValue)} C</button>}</div>{nextLifeNeeded && !legacy && <p className="aof-life-notice">下一手補命需 {fmt(nextLifeCost)} C · {careerBalance >= nextLifeCost ? "按下一手時扣款" : "餘額不足，無法補命"}</p>}</section>{bankrollMessage && <p className="bankroll-message" role="alert">{bankrollMessage}</p>}
     <div className="aof-run-strip"><div><span>RUN</span><b>第 {state.runNo ?? 1} 局</b></div><div><span>本局手數</span><b>{state.runHands ?? 0}</b></div><div><span>連勝</span><b>{state.streak ?? 0}</b></div><div><span>娛樂 XP</span><b>{xp}</b></div></div>
     <details className="aof-settings"><summary>動畫、音效及重新開始</summary><div className="aof-playback" aria-label="AOF動畫設定">
@@ -1497,7 +1500,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
       {view.players.map((p,index) => <div key={index} className={`aof-seat aof-seat-${index} ${game.turn === index ? "acting" : ""} ${p.folded ? "folded" : ""} ${lives[index] === 0 ? "eliminated" : ""} ${!revealing && p.stack > 0 && p.stack <= 3 && lives[index] > 0 ? "aof-short-stack" : ""} ${winners.includes(index) ? "aof-winner" : ""} ${boss?.seat === index ? "aof-boss-seat" : ""}`}>
         <div><b>{boss?.seat === index ? `${boss.name} · ${boss.title}` : p.name}</b><span>{lives[index] === 0 ? "OUT" : tablePosition(game,index)}</span></div><strong>{fmt(p.stack)} BB</strong>
         {!revealing && p.stack > 0 && p.stack <= 3 && lives[index] > 0 && <span className="aof-danger-badge">⚠ 短碼危險</span>}
-        <div className="aof-lives" aria-label={`${p.name}剩餘${lives[index]}條命`}>{[0,1,2].map(life => <span key={life} className={life < lives[index] ? "live" : "lost"}>♥</span>)}</div>
+        {!standard && <div className="aof-lives" aria-label={`${p.name}剩餘${lives[index]}條命`}>{[0,1,2].map(life => <span key={life} className={life < lives[index] ? "live" : "lost"}>♥</span>)}</div>}
         <div className="aof-cards">{p.hole.map((card,i) => {
           const faceUp = index === 0 || exposed && !p.folded || foldReveal && winners.includes(index);
           return <div key={`${game.handNo}-${i}-${faceUp}-${foldReveal}`} className={`${faceUp && index !== 0 && (exposed || foldReveal) ? "aof-flip" : ""} ${winners.includes(index) && winningKeys.has(cardKey(card)) ? "aof-card-used" : ""}`}><CardView card={card} mini hidden={!faceUp} /></div>;
@@ -1516,19 +1519,19 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
     {foldReveal && <p className="aof-fold-note">娛樂揭牌顯示收池 AI 嘅底牌及同一副牌嘅假設 runout；正式牌局已於你棄牌時完結，牌面不影響盈虧、命數或統計。</p>}
     <p className="aof-message" aria-live="polite">{revealing ? `${stageLabel} · 等待揭牌…` : foldReveal ? `${PLAYER_NAMES[game.winners[0]]} 亮牌 · 睇下如果繼續會發生咩事` : paid ? game.message : game.turn === 0 ? "輪到你：全押或棄牌" : `${game.players[game.turn ?? 0].name} 正在思考…`}</p>
     {revealing ? <div className="aof-actions"><button onClick={() => onChange({ ...state, revealStep: 5 })}>跳過動畫 · 顯示結果</button></div>
-      : paid && state.runFinished ? <div className="aof-actions"><button className="aof-jam" onClick={next}>{state.bossLastResult === "complete" ? "完成 Boss Run · 返回三命 Run" : state.bossActive && state.bossLastResult === "win" ? "下一關 · 回復三條命" : state.bossActive ? "重試本關 · 回復三條命" : `開始第 ${(state.runNo ?? 1)+1} 局 · 回復三條命`}</button></div>
+      : paid && state.runFinished ? <div className="aof-actions"><button className="aof-jam" onClick={next}>{standard ? "重新買入 8BB · 開新局" : state.bossLastResult === "complete" ? "完成 Boss Run · 返回三命 Run" : state.bossActive && state.bossLastResult === "win" ? "下一關 · 回復三條命" : state.bossActive ? "重試本關 · 回復三條命" : `開始第 ${(state.runNo ?? 1)+1} 局 · 回復三條命`}</button></div>
       : paid && foldEligible && !foldReveal ? <div className="aof-actions"><button onClick={() => onChange({ ...state, foldReveal: true })}>✦ 娛樂揭牌</button><button className="aof-jam" onClick={next}>{nextLifeNeeded && !legacy ? careerBalance >= nextLifeCost ? `補命 ${fmt(nextLifeCost)} C · 下一手` : "餘額不足 · 結束 Run" : "下一手 · 籌碼延續"}</button></div>
       : paid ? <div className="aof-actions"><button className="aof-jam" onClick={next}>{nextLifeNeeded && !legacy ? careerBalance >= nextLifeCost ? `補命 ${fmt(nextLifeCost)} C · 下一手` : "餘額不足 · 結束 Run" : "下一手 · 籌碼延續"}</button></div>
       : <div className="aof-actions"><button disabled={game.turn !== 0} onClick={() => move(false)}>Fold 棄牌</button><button className="aof-jam" disabled={game.turn !== 0} onClick={() => move(true)}>{facingAllIn && !canRaiseAllIn ? "Call All-in" : "All-in"} · {fmt(game.players[0].stack)}BB</button><button disabled={game.turn !== 0} onClick={() => setHint(!hint)}>AOF 提示</button></div>}
-    <section className={`aof-boss-panel ${boss ? "active" : ""}`} aria-label="AOF Boss Run">
+    {!standard && <section className={`aof-boss-panel ${boss ? "active" : ""}`} aria-label="AOF Boss Run">
       <div className="aof-boss-head"><div><span>BOSS RUN</span><h2>{boss ? `第 ${(state.bossStage ?? 0)+1} 關 · ${boss.name}` : "挑戰三位 Boss"}</h2></div><strong>{state.bossCycles ?? 0} 冠</strong></div>
       <div className="aof-boss-map">{AOF_BOSSES.map((item,index) => <div key={item.id} className={`${boss ? index < (state.bossStage ?? 0) ? "cleared" : "" : (state.bossTrophies ?? []).includes(item.id) ? "cleared" : ""} ${boss && index === (state.bossStage ?? 0) ? "current" : ""}`}><i>{index+1}</i><span>{item.name}</span><small>{item.title}</small></div>)}</div>
       {boss ? <div className="aof-boss-card"><div className="aof-boss-avatar">♛</div><div><b>{boss.name} · {boss.title}</b><p>{boss.style} Boss 只改變公開可見嘅策略傾向，牌序與勝率完全不變。</p></div></div>
         : <><p>由石牆、赤狐到夜王，連續完成三個三命 Run 即可奪冠。每關使用真實牌局規則，沒有加權抽牌。</p><button className="aof-boss-start" disabled={!bossCanStart} onClick={startBoss}>{bossCanStart ? "開始 Boss Run" : "本手完結後開始"}</button></>}
       {paid && state.runFinished && state.bossLastResult && <div className={`aof-boss-result ${state.bossLastResult}`}><b>{state.bossLastResult === "complete" ? "三王擊破 · Boss Run 冠軍！" : state.bossLastResult === "win" ? `擊破 ${AOF_BOSSES[state.bossLastStage ?? 0].name}！` : `${AOF_BOSSES[state.bossLastStage ?? 0].name} 守住關卡`}</b><span>{state.bossLastResult === "loss" ? "下一局可原關重試" : state.bossLastResult === "complete" ? "+25 XP · 已記錄冠軍次數" : "+12 XP · 下一關已解鎖"}</span></div>}
       {boss && paid && state.runFinished && <button className="aof-boss-exit" onClick={() => onChange({ ...state, bossActive: false, bossStage: 0, bossLastResult: undefined, bossLastStage: undefined })}>返回一般三命 Run</button>}
-    </section>
-    {paid && state.runFinished && <section className="aof-run-result"><span>RUN 完結</span><h2>{state.cashOutEarly ? "已結束 Run 並兌回籌碼" : lives[0] > 0 ? "你成為最後生還者！" : "你嘅三條命已用盡"}</h2><p>第 {state.runNo ?? 1} 局共完成 {state.runHands ?? 0} 手 · 最高連勝 {state.bestStreak ?? 0} · 累積 {xp} XP</p></section>}
+    </section>}
+    {paid && state.runFinished && <section className="aof-run-result"><span>RUN 完結</span><h2>{state.cashOutEarly ? standard ? "已結束牌桌並兌回籌碼" : "已結束 Run 並兌回籌碼" : standard ? "籌碼用盡，可以重新買入" : lives[0] > 0 ? "你成為最後生還者！" : "你嘅三條命已用盡"}</h2><p>第 {state.runNo ?? 1} 局共完成 {state.runHands ?? 0} 手 · 最高連勝 {state.bestStreak ?? 0} · 累積 {xp} XP</p></section>}
     {winningHands.length > 0 && <section className="aof-winning-hands"><h2>{winners.length > 1 ? "平分底池" : "勝出牌型"}</h2>{winningHands.map(h => <div key={h.index}><strong>{PLAYER_NAMES[h.index]} · {h.label}</strong><div>{h.cards.map(c => <CardView key={cardKey(c)} card={c} mini />)}</div></div>)}</section>}
     {exposed && equities.length > 0 && <p className="aof-equity-note">百分比包含平分底池份額；翻牌前／Flop 為600次模擬，Turn／River 為完整枚舉。只根據已揭底牌及當前公共牌，未揭牌不參與計算。</p>}
     {hint && game.turn === 0 && <p className="aof-advice">估算建議：{advice.jam ? facingAllIn && !canRaiseAllIn ? "跟全押" : "全押" : "棄牌"}。{advice.reason}只使用你嘅底牌及公開行動；並非精確GTO。</p>}
@@ -1541,7 +1544,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
     </section>
     <section className="aof-panel aof-rewards"><div className="aof-reward-head"><div><span>外觀獎勵</span><h2>娛樂等級 {Math.floor(xp/25)+1}</h2></div><strong>{xp} XP</strong></div><div className="aof-xp-track"><i style={{ width: `${rewardProgress}%` }} /></div><p>{nextTheme ? `再取得 ${nextTheme.unlock-xp} XP 解鎖「${nextTheme.label}」` : "所有牌桌主題已解鎖"}</p><div className="aof-theme-picker">{AOF_THEMES.map(item => { const available = unlocked.includes(item.id); return <button key={item.id} disabled={!available} aria-pressed={theme === item.id} onClick={() => available && onChange({ ...state, theme: item.id })}>{available ? item.label : `${item.unlock} XP`}</button>; })}</div></section>
     <section className="aof-panel aof-highlights"><div className="aof-reward-head"><div><span>SESSION REEL</span><h2>牌局精華</h2></div><strong>{(state.highlights ?? []).length}</strong></div>{(state.highlights ?? []).length ? <div>{(state.highlights ?? []).slice(0,6).map(item => <article className={item.tone} key={item.id}><b>#{item.hand}</b><span><strong>{item.title}</strong><small>{item.detail}</small></span></article>)}</div> : <p>完成牌局後，反勝、多人 All-in、罕見牌型及出局時刻會自動收錄。</p>}</section>
-    <section className="aof-panel"><h2>AOF Session</h2><p>實際 {fmt(latest?.actual ?? 0)}BB · All-in EV {fmt(latest?.allInEv ?? 0)}BB{revealing ? " · 揭牌後更新" : ""}</p><ProfitChart points={view.profits} /><div className="aof-stats"><table><thead><tr><th>玩家</th><th>手數</th><th>盈虧 BB</th><th>推牌率</th><th>跟全押率</th></tr></thead><tbody>{stats.map((s,i) => <tr key={i}><td>{PLAYER_NAMES[i]}</td><td>{s.hands}</td><td>{fmt(s.profit)}</td><td>{s.pushOpportunities ? `${statPercent(s.pushes,s.pushOpportunities)}%` : "—"}</td><td>{s.callOpportunities ? `${statPercent(s.calls,s.callOpportunities)}%` : "—"}</td></tr>)}</tbody></table></div><p>推牌率只計未有人全押嘅機會；跟全押率只計面對全押嘅機會。每條命爆倉後補回8BB，補碼本身不計盈虧；標準桌統計不受影響。</p></section>
+    <section className="aof-panel"><h2>AOF Session</h2><p>實際 {fmt(latest?.actual ?? 0)}BB · All-in EV {fmt(latest?.allInEv ?? 0)}BB{revealing ? " · 揭牌後更新" : ""}</p><ProfitChart points={view.profits} /><div className="aof-stats"><table><thead><tr><th>玩家</th><th>手數</th><th>盈虧 BB</th><th>推牌率</th><th>跟全押率</th></tr></thead><tbody>{stats.map((s,i) => <tr key={i}><td>{PLAYER_NAMES[i]}</td><td>{s.hands}</td><td>{fmt(s.profit)}</td><td>{s.pushOpportunities ? `${statPercent(s.pushes,s.pushOpportunities)}%` : "—"}</td><td>{s.callOpportunities ? `${statPercent(s.calls,s.callOpportunities)}%` : "—"}</td></tr>)}</tbody></table></div><p>推牌率只計未有人全押嘅機會；跟全押率只計面對全押嘅機會。{standard ? "對手爆倉後補回 8BB；你爆倉後可再買入。" : "每條命爆倉後補回8BB，補碼本身不計盈虧。"}標準桌統計不受影響。</p></section>
   </main>;
 }
 
@@ -1885,6 +1888,7 @@ export default function Home() {
   const [lobbyCashBb, setLobbyCashBb] = useState(1);
   const [lobbyTournamentEntry, setLobbyTournamentEntry] = useState(50);
   const [lobbyAofBb, setLobbyAofBb] = useState(1);
+  const [lobbyAofVariant, setLobbyAofVariant] = useState<"run" | "standard">("run");
   const [bankrollMessage, setBankrollMessage] = useState("");
   const [lobbySize, setLobbySize] = useState(8);
   const [lobbyMtt, setLobbyMtt] = useState(false);
@@ -2638,7 +2642,7 @@ export default function Home() {
 
   const enterAof = () => {
     if (!aof) {
-      const next = newAof();
+      const next = newAof(lobbyAofVariant);
       const opened = openAof(careerRef.current, `${next.game.tableId}:1`, lobbyAofBb);
       if (!opened) { setBankrollMessage(`AOF 第一條命需要 ${lobbyAofBb * 8} C；請揀較低級別。`); return; }
       commitCareer(opened); aofRef.current = next; setAof(next);
@@ -2649,7 +2653,7 @@ export default function Home() {
     if (!aof) { enterAof(); return; }
     const previous = aof;
     if (!previous.game.finished || aofPresentation(previous).revealing) { setBankrollMessage("請先完成目前牌局及揭牌，再開始新 Run。"); return; }
-    const next = aofRestartRun(previous);
+    const next = { ...aofRestartRun(previous), variant: lobbyAofVariant, lives: lobbyAofVariant === "standard" ? [1,1,1,1] : [3,3,3,3], bossActive: false, bossStage: 0 };
     applyAofState(next);
     if (aofRef.current === next) { setEntryView("table"); setAofOpen(true); }
   };
@@ -2735,7 +2739,8 @@ export default function Home() {
       </>}
       {setupMode === "aof" && <div className="lobby-brand"><div className="brand-mark">♦</div><div><span>ALL-IN OR FOLD</span><h2>AOF Run 設定</h2><p>揀盲注級別，然後開始新 Run 或繼續目前進度。</p></div></div>}
       {setupMode === "aof" && <>
-      <div className="lobby-section career-stakes" id="aof-stakes"><div className="lobby-label"><span>AOF</span><div><b>AOF 盲注級別</b><small>8BB 一條命；只喺爆倉補命時再扣款</small></div></div><div className="career-stake-grid" role="group" aria-label="AOF 級別">{AOF_BIG_BLINDS.map(bb => <button key={bb} className={lobbyAofBb === bb ? "selected" : ""} aria-pressed={lobbyAofBb === bb} onClick={() => setLobbyAofBb(bb)}>{fmt(bb / 2)} / {bb}<small>每條命 {bb * 8} C</small></button>)}</div><div className={`career-risk ${aofRisk.level}`} role="status" aria-live="polite"><div><b>{aofRisk.level === "comfortable" ? "資金充足" : aofRisk.level === "caution" ? "資金風險較高" : "資金不足"}</b><span>可支付 {aofRisk.affordableEntries} 條命 · 完整三命 {Math.floor(aofStartingBalance / aofRisk.maximumCost)} 次</span></div><p>開局先扣 <strong>{fmt(aofRisk.initialCost)} C</strong> · 三命最多 <strong>{fmt(aofRisk.maximumCost)} C</strong></p><small>{riskDescription(aofRisk, "aof")}{aofStartingBalance !== career.balance && " 開新 Run 時先兌回目前桌上籌碼。"}</small></div><button className="career-aof-launch" disabled={!!aof && (!aof.game.finished || aofPresentation(aof).revealing)} onClick={startNewAof}>{aof ? "以所選級別開始新 AOF Run" : "開始 AOF Run"}</button>{aof && <button className="resume-table" onClick={enterAof}>繼續目前 AOF Run{career.aof ? ` · BB ${career.aof.bb} C` : ""}</button>}</div>
+      <div className="lobby-section"><div className="lobby-label"><span>AOF</span><div><b>選擇玩法</b><small>開始新牌桌時生效；目前進度可繼續</small></div></div><div className="mtt-choice" role="group" aria-label="選擇 AOF 玩法"><button type="button" className={lobbyAofVariant === "run" ? "selected" : ""} aria-pressed={lobbyAofVariant === "run"} onClick={() => setLobbyAofVariant("run")}><b>三命 Run</b><small>保留 Boss 挑戰及三條命</small></button><button type="button" className={lobbyAofVariant === "standard" ? "selected" : ""} aria-pressed={lobbyAofVariant === "standard"} onClick={() => setLobbyAofVariant("standard")}><b>標準 AOF</b><small>8BB 買入 · 爆倉後可再買入</small></button></div></div>
+      <div className="lobby-section career-stakes" id="aof-stakes"><div className="lobby-label"><span>AOF</span><div><b>AOF 盲注級別</b><small>{lobbyAofVariant === "standard" ? "8BB 一次買入；爆倉後可重新買入" : "8BB 一條命；只喺爆倉補命時再扣款"}</small></div></div><div className="career-stake-grid" role="group" aria-label="AOF 級別">{AOF_BIG_BLINDS.map(bb => <button key={bb} className={lobbyAofBb === bb ? "selected" : ""} aria-pressed={lobbyAofBb === bb} onClick={() => setLobbyAofBb(bb)}>{fmt(bb / 2)} / {bb}<small>{lobbyAofVariant === "standard" ? "每次買入" : "每條命"} {bb * 8} C</small></button>)}</div><div className={`career-risk ${aofRisk.level}`} role="status" aria-live="polite"><div><b>{aofRisk.level === "comfortable" ? "資金充足" : aofRisk.level === "caution" ? "資金風險較高" : "資金不足"}</b><span>{lobbyAofVariant === "standard" ? `可支付 ${aofRisk.affordableEntries} 次買入` : `可支付 ${aofRisk.affordableEntries} 條命 · 完整三命 ${Math.floor(aofStartingBalance / aofRisk.maximumCost)} 次`}</span></div><p>開局先扣 <strong>{fmt(aofRisk.initialCost)} C</strong>{lobbyAofVariant === "run" && <> · 三命最多 <strong>{fmt(aofRisk.maximumCost)} C</strong></>}</p><small>{lobbyAofVariant === "standard" ? "每次重新買入先扣 8BB；離桌時兌回剩餘籌碼。" : riskDescription(aofRisk, "aof")}{aofStartingBalance !== career.balance && " 開新 Run 時先兌回目前桌上籌碼。"}</small></div><button className="career-aof-launch" disabled={!!aof && (!aof.game.finished || aofPresentation(aof).revealing)} onClick={startNewAof}>{aof ? `以所選級別開始新${lobbyAofVariant === "standard" ? "標準 AOF" : "三命 Run"}` : `開始${lobbyAofVariant === "standard" ? "標準 AOF" : "三命 Run"}`}</button>{aof && <button className="resume-table" onClick={enterAof}>繼續目前 AOF Run{career.aof ? ` · BB ${career.aof.bb} C` : ""}</button>}</div>
       </>}
       {setupMode !== "aof" && <>
       <HandFilterPanel filter={handFilter} onChange={setHandFilter} tableSize={lobbySize} />
