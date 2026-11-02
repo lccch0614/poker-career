@@ -1937,6 +1937,9 @@ export default function Home() {
   const [dealMotion, setDealMotion] = useState<{ id: number; tableId: string; handNo: number; seats: number[] } | null>(null);
   const [motionMode, setMotionMode] = useState<"normal" | "fast" | "off">("normal");
   const [quickFold, setQuickFold] = useState(false);
+  const [queuedFoldHand, setQueuedFoldHand] = useState<string | null>(null);
+  const queuedFoldKey = `${game.tableId}-${game.handNo}`;
+  const queuedFold = queuedFoldHand === queuedFoldKey && !game.finished;
   const previousTable = useRef<Game | null>(null);
   const [standardCinematic, setStandardCinematic] = useState<StandardCinematic | null>(null);
   const motionSerial = useRef(0);
@@ -2111,9 +2114,16 @@ export default function Home() {
         const moved = aiMove(previous, actor, difficulty, mtt);
         return recordAiStudyDecision(previous, moved, actor, difficulty);
       });
-    }, quickFold && gameMode === "cash" && game.players[0].folded ? 0 : 360 + Math.random() * 360);
+    }, quickFold && gameMode === "cash" && (game.players[0].folded || queuedFold) ? 0 : 360 + Math.random() * 360);
     return () => window.clearTimeout(timer);
-  }, [restoreReady, started, aofOpen, game.turn, game.finished, game.handNo, game.actionId, difficulty, mtt, quickFold, gameMode, game.players[0].folded]);
+  }, [restoreReady, started, aofOpen, game.turn, game.finished, game.handNo, game.actionId, difficulty, mtt, quickFold, gameMode, game.players[0].folded, queuedFold]);
+
+  useEffect(() => {
+    if (!restoreReady || !started || aofOpen || !quickFold || gameMode !== "cash" || !queuedFold || game.finished || game.turn !== 0) return;
+    setQueuedFoldHand(null);
+    setHint(null);
+    setGame(previous => previous.tableId === game.tableId && previous.handNo === game.handNo && previous.turn === 0 && !previous.finished ? act(previous, 0, "fold") : previous);
+  }, [restoreReady, started, aofOpen, quickFold, gameMode, queuedFold, game.tableId, game.handNo, game.turn, game.finished]);
 
   useLayoutEffect(() => {
     if (!restoreReady) return;
@@ -2785,7 +2795,7 @@ export default function Home() {
         <div className="difficulty-switch" role="group" aria-label="AI 難度">
           {(Object.keys(DIFFICULTY_INFO) as Difficulty[]).map(mode => <button key={mode} className={difficulty === mode ? "selected" : ""} aria-pressed={difficulty === mode} onClick={() => setDifficulty(mode)}><span>{DIFFICULTY_INFO[mode].label}</span><small>{DIFFICULTY_INFO[mode].short}</small></button>)}
         </div>
-        <div className="training-switch">{!isTournament && <button type="button" aria-pressed={quickFold} className={quickFold ? "active" : ""} onClick={() => { const next = !quickFold; setQuickFold(next); try { window.localStorage.setItem("poker-quick-fold", next ? "yes" : "no"); } catch { /* Keep the setting for this session. */ } }}>快速棄牌 {quickFold ? "ON" : "OFF"}</button>}<button onClick={() => setLeakFinderOpen(true)}>Leak Finder</button><button onClick={openScenarioLab}>情境訓練</button><button className={studyMode ? "active" : ""} onClick={() => setStudyMode(value => !value)}>Study {studyMode ? "ON" : "OFF"}</button></div>
+        <div className="training-switch">{!isTournament && <button type="button" aria-pressed={quickFold} className={quickFold ? "active" : ""} onClick={() => { const next = !quickFold; setQuickFold(next); if (!next) setQueuedFoldHand(null); try { window.localStorage.setItem("poker-quick-fold", next ? "yes" : "no"); } catch { /* Keep the setting for this session. */ } }}>快速棄牌 {quickFold ? "ON" : "OFF"}</button>}<button onClick={() => setLeakFinderOpen(true)}>Leak Finder</button><button onClick={openScenarioLab}>情境訓練</button><button className={studyMode ? "active" : ""} onClick={() => setStudyMode(value => !value)}>Study {studyMode ? "ON" : "OFF"}</button></div>
       </div>
       <div className="hand-meta"><span>第 {game.handNo} 手</span><span>{STREET_LABEL[game.street]}</span><span className={`save-status ${saveStatus}`}>● {saveStatusLabel}</span><label className="standard-motion-control">動畫 <select aria-label="標準牌桌動畫速度" value={motionMode} onChange={event => changeMotionMode(event.target.value as "normal" | "fast" | "off")}><option value="normal">正常</option><option value="fast">快速</option><option value="off">關閉</option></select></label><button onClick={openLobby}>新牌桌</button></div>
     </header>
@@ -2817,8 +2827,8 @@ export default function Home() {
         </div>
 
         <div className="status-line"><div><span className={game.turn === 0 ? "turn-dot active" : "turn-dot"} />{thinking ? `${thinking} 正在思考…` : game.message}</div>{heroHand && !game.finished && <span className="hand-strength">目前：{heroHand}</span>}</div>
-        {!game.finished ? <><div className={`controls ${isTournament ? "tournament-controls" : "cash-controls"} ${game.turn !== 0 ? "disabled" : ""}`}><div className="mobile-hero-summary" aria-label={`你的底牌 ${hero.hole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join("、")}；籌碼 ${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}`}><span className="mobile-hero-title">你嘅底牌</span><span className="mobile-hero-cards" aria-hidden="true">{hero.hole.map((card, index) => <CardView key={index} card={card} mini />)}</span><span className="mobile-hero-stack">{hero.folded ? "已棄牌" : `${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}`}<small>{heroHand && !hero.folded ? heroHand : game.turn === 0 ? "輪到你" : ""}</small></span></div>{isTournament && <div className={`tournament-decision-clock ${timedTurnActive && tournamentClock?.remainingMs !== undefined && tournamentClock.remainingMs <= 5000 ? "urgent" : ""}`} role="timer" aria-label="行動倒數"><div><b>{timedTurnActive && tournamentClock?.turnKey === tournamentTurnKey ? Math.ceil(tournamentClock.remainingMs / 1000) : "—"} 秒</b><span>Time-bank 餘額 {Math.ceil((tournamentClock?.bankMs ?? 90_000) / 1000)} 秒</span></div><button disabled={!timedTurnActive || tournamentClock?.turnKey !== tournamentTurnKey || !!tournamentClock.extended || !tournamentClock.bankMs || !tournamentClock.remainingMs} onClick={() => setTournamentClock(previous => previous?.turnKey === tournamentTurnKey ? extendDecisionClock(previous) : previous)}>＋ 15 秒 Time-bank</button></div>}
-          <button className="action secondary danger" disabled={game.turn !== 0} onClick={() => heroAction("fold")}>棄牌</button>
+        {!game.finished ? <><div className={`controls ${isTournament ? "tournament-controls" : "cash-controls"} ${game.turn !== 0 && !(quickFold && !isTournament && game.street === "preflop" && game.pending[0] && canAct(hero) && !queuedFold) ? "disabled" : ""}`}><div className="mobile-hero-summary" aria-label={`你的底牌 ${hero.hole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join("、")}；籌碼 ${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}`}><span className="mobile-hero-title">你嘅底牌</span><span className="mobile-hero-cards" aria-hidden="true">{hero.hole.map((card, index) => <CardView key={index} card={card} mini />)}</span><span className="mobile-hero-stack">{hero.folded ? "已棄牌" : `${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}`}<small>{heroHand && !hero.folded ? heroHand : game.turn === 0 ? "輪到你" : ""}</small></span></div>{isTournament && <div className={`tournament-decision-clock ${timedTurnActive && tournamentClock?.remainingMs !== undefined && tournamentClock.remainingMs <= 5000 ? "urgent" : ""}`} role="timer" aria-label="行動倒數"><div><b>{timedTurnActive && tournamentClock?.turnKey === tournamentTurnKey ? Math.ceil(tournamentClock.remainingMs / 1000) : "—"} 秒</b><span>Time-bank 餘額 {Math.ceil((tournamentClock?.bankMs ?? 90_000) / 1000)} 秒</span></div><button disabled={!timedTurnActive || tournamentClock?.turnKey !== tournamentTurnKey || !!tournamentClock.extended || !tournamentClock.bankMs || !tournamentClock.remainingMs} onClick={() => setTournamentClock(previous => previous?.turnKey === tournamentTurnKey ? extendDecisionClock(previous) : previous)}>＋ 15 秒 Time-bank</button></div>}
+          <button className="action secondary danger" disabled={game.turn !== 0 && !(quickFold && !isTournament && game.street === "preflop" && game.pending[0] && canAct(hero) && !queuedFold)} onClick={() => { if (game.turn === 0) heroAction("fold"); else setQueuedFoldHand(queuedFoldKey); }}>{game.turn !== 0 && quickFold && !isTournament && game.street === "preflop" && game.pending[0] && canAct(hero) ? queuedFold ? "已預選棄牌" : "快速棄牌" : "棄牌"}</button>
           <button className="action secondary call-action" disabled={game.turn !== 0} onClick={() => { if (toCall >= hero.stack && toCall > 0 && !window.confirm(`確認 All-in 跟注？今次投入 ${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}。`)) return; heroAction("checkcall"); }}>{toCall > 0 ? `跟注 ${fmt(Math.min(toCall, hero.stack))}` : "過牌"}</button>
           <button className={`action hint-action ${visibleHint ? "hint-open" : ""}`} disabled={game.turn !== 0} onClick={() => setHint(visibleHint ? null : buildGtoHint(game))}>✦ AI 提示</button>
           <div className="raise-control"><div className="raise-presets" aria-label="快捷下注尺度">
