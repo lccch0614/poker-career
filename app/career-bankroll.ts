@@ -57,9 +57,23 @@ export function restoreCareerWallet(value: unknown, legacy = false): CareerWalle
   const legacyBalance = Math.round((CAREER_STARTING_BANKROLL + wallet.transactions.reduce((sum, entry) => sum + entry.amount, 0)) * 100) / 100;
   const savedBalance = wallet.balance ?? NaN;
   if (!Number.isFinite(savedBalance) || savedBalance < 0 || (Math.abs(balance - savedBalance) > 0.001 && Math.abs(legacyBalance - savedBalance) > 0.001)) throw new Error("Career balance mismatch");
-  if (wallet.cash && (!ids.has(`cash:${wallet.cash.id}:buy-in`) || wallet.cash.buyInsPaid < 1 || wallet.cash.buyInsPaid > 3)) throw new Error("Cash session invalid");
-  if (wallet.tournament && !ids.has(`tournament:${wallet.tournament.id}:entry`)) throw new Error("Tournament session invalid");
-  if (wallet.aof && (!ids.has(`aof:${wallet.aof.id}:life:1`) || wallet.aof.livesPaid < 1 || wallet.aof.livesPaid > 3)) throw new Error("AOF session invalid");
+  // A damaged stake must never be used to price a rebuy or cash-out.
+  const matchesEntry = (id: string, sessionId: string, mode: CareerMode, kind: CareerTransaction["kind"], amount: number) =>
+    wallet.transactions!.some(entry => entry.id === id && entry.sessionId === sessionId && entry.mode === mode && entry.kind === kind && entry.amount === amount);
+  if (wallet.cash) {
+    const session = wallet.cash;
+    if (typeof session.id !== "string" || !session.id || !CASH_BIG_BLINDS.includes(session.bb as typeof CASH_BIG_BLINDS[number]) || !Number.isInteger(session.buyInsPaid) || session.buyInsPaid < 1 || session.buyInsPaid > 3 || !matchesEntry(`cash:${session.id}:buy-in`, session.id, "cash", "buy-in", -100 * session.bb)) throw new Error("Cash session invalid");
+    for (let n = 1; n < session.buyInsPaid; n++) if (!matchesEntry(`cash:${session.id}:rebuy:${n}`, session.id, "cash", "rebuy", -100 * session.bb)) throw new Error("Cash session invalid");
+  }
+  if (wallet.tournament) {
+    const session = wallet.tournament;
+    if (typeof session.id !== "string" || !session.id || !TOURNAMENT_ENTRIES.includes(session.entry as typeof TOURNAMENT_ENTRIES[number]) || !Number.isInteger(session.tableSize) || session.tableSize < 2 || session.tableSize > 8 && session.tableSize !== MTT_ENTRIES || !matchesEntry(`tournament:${session.id}:entry`, session.id, "tournament", "entry", -session.entry)) throw new Error("Tournament session invalid");
+  }
+  if (wallet.aof) {
+    const session = wallet.aof;
+    if (typeof session.id !== "string" || !session.id || !AOF_BIG_BLINDS.includes(session.bb as typeof AOF_BIG_BLINDS[number]) || !Number.isInteger(session.livesPaid) || session.livesPaid < 1 || session.livesPaid > 3) throw new Error("AOF session invalid");
+    for (let n = 1; n <= session.livesPaid; n++) if (!matchesEntry(`aof:${session.id}:life:${n}`, session.id, "aof", "life", -8 * session.bb)) throw new Error("AOF session invalid");
+  }
   return { ...wallet, version: 1, balance: savedBalance, transactions: wallet.transactions };
 }
 
