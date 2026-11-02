@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const ts = require('typescript');
 require.extensions['.ts'] = (mod, filename) => mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
-const { emptyHandTracker, recordOpponentProfile, restoreOpponentProfiles, statPercent } = require('../app/session-stats.ts');
+const { emptyHandTracker, recordOpponentProfile, restoreOpponentProfiles, updateOpponentNote, statPercent } = require('../app/session-stats.ts');
 const tracker = { ...emptyHandTracker(), vpip: true, pfr: true, threeBet: true, threeBetOpportunity: true, sawFlop: true };
 let profile = recordOpponentProfile(undefined, 'cash-a-1', tracker, true, true);
 assert.equal(profile.hands, 1);
@@ -20,3 +20,14 @@ const corrupt = restoreOpponentProfiles({ 'ai:1': { hands: -7, vpipHands: Infini
 assert.equal(corrupt['ai:1'].hands, 0);
 assert.equal(corrupt['ai:1'].vpipHands, 0);
 assert.equal(corrupt['ai:1'].lastHandKey, '');
+
+// Notes persist through hands and portable JSON saves without counting an extra hand.
+let noted = updateOpponentNote(undefined, '喜歡翻牌前加注');
+assert.equal(noted.hands, 0);
+noted = recordOpponentProfile(noted, 'cash-c-1', tracker, true, true);
+assert.equal(noted.note, '喜歡翻牌前加注');
+noted = restoreOpponentProfiles(JSON.parse(JSON.stringify({ 'ai:3': noted })))['ai:3'];
+assert.equal(noted.note, '喜歡翻牌前加注');
+assert.equal(updateOpponentNote(noted, 'x'.repeat(200)).note.length, 160);
+assert.equal(updateOpponentNote(noted, '').note, '');
+assert.equal(restoreOpponentProfiles({ 'ai:1': { note: 1 } })['ai:1'].note, '');
