@@ -269,3 +269,22 @@ assert.equal(standardWallet.balance, 2999.75);
 assert.equal(cashOut(standardWallet, 'standard-session', 7.75), null);
 standardWallet = buyIn(standardWallet, 'standard-next', 1);
 assert.equal(standardWallet.balance, 2991.75);
+
+// When ante and blinds consume all stacks, AOF settles once without an actor.
+for (const variant of ['run', 'standard']) {
+  const state = newAof(variant);
+  state.game = newHand([.2, .2, 0, 0], 0, 90, () => .31, [0,0,0,0], 'forced-aof', .25);
+  assert.equal(state.game.turn, null);
+  assert.equal(state.game.finished, false);
+  const settled = aofAct(JSON.parse(JSON.stringify(state)), null, false);
+  assert.equal(settled.game.finished, true);
+  assert.equal(settled.game.board.length, 5);
+  assert.ok(Math.abs(settled.game.players.reduce((sum, player) => sum + player.stack, 0) - .4) < 1e-8);
+  assert.equal(settled.runHands, 1);
+  assert.equal(settled.profits.length, 1);
+  assert.deepEqual(settled.stats.map(item => item.hands), [1,1,0,0]);
+  assert.equal(aofAct(settled, null, false), settled);
+  assert.equal(aofAct(JSON.parse(JSON.stringify(settled)), null, false).profits.length, 1);
+}
+const ordinaryAof = newAof();
+assert.equal(aofAct(ordinaryAof, null, false), ordinaryAof);
