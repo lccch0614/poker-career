@@ -128,6 +128,17 @@ function makeDeck(rng: () => number = Math.random) {
 function cardKey(card: Card) { return `${card.rank}${card.suit}`; }
 function canAct(seat: Seat) { return !seat.folded && !seat.allIn && seat.stack > 0; }
 function potTotal(game: Game) { return game.players.reduce((sum, player) => sum + player.totalBet, 0); }
+// A short all-in requires a response but does not by itself reopen raising.
+// The existing hand timeline also lets old saves recover the same rights.
+function mayRaise(game: Game, actor: number): boolean {
+  const seat = game.players[actor];
+  if (!seat || !canAct(seat) || seat.streetBet + seat.stack <= game.currentBet + 1e-8) return false;
+  const last = [...(game.timeline ?? [])].reverse().find(frame => frame.street === game.street && frame.actor === actor);
+  if (!last) return true;
+  // A check before any wager does not surrender the right to raise a later bet.
+  if (last.currentBet === 0 && last.players[actor]?.lastAction === "過牌") return true;
+  return game.currentBet - last.currentBet >= game.minRaise - 1e-8;
+}
 function captureFrame(game: Game, action: string, actor: number | null): HandFrame {
   return {
     id: game.timeline.length,
@@ -389,6 +400,7 @@ function finishAction(game: Game, actor: number): Game {
 
 function act(game: Game, actor: number, action: "fold" | "checkcall" | "raise", raiseTo = 0, autoFold = false): Game {
   if (game.finished || game.turn !== actor || !canAct(game.players[actor])) return game;
+  if (action === "raise" && !mayRaise(game, actor)) action = "checkcall";
   const players = game.players.map(player => ({ ...player }));
   const seat = players[actor];
   let pending = [...game.pending];
@@ -800,12 +812,18 @@ function buildGtoHint(game: Game): GtoHint {
   const pot = potTotal(game);
   const toCall = Math.max(0, game.currentBet - seat.streetBet);
   const maxTo = seat.streetBet + seat.stack;
-  const canRaise = maxTo > game.currentBet;
+  const canRaise = mayRaise(game, 0);
 
   if (game.street === "preflop") {
     const position = tablePosition(game, 0);
     const limpers = game.players.filter((player, index) => index !== 0 && /跟注/.test(player.lastAction)).length;
     const advice = getPreflopAdvice(seat.hole, position, game.preflopRaises, toCall, limpers, activeTableSize(game));
+    if (!canRaise && ["raise", "threeBet", "fourBet", "jam"].includes(advice.action)) return {
+      handNo: game.handNo, actionId: game.actionId, action: toCall > 0 ? "跟注或棄牌" : "過牌", size: "",
+      title: `${position} · ${advice.hand} · 翻牌前參考`,
+      detail: "目前不能加注；請按可用行動、底池賠率及對手範圍自行決定。原本策略建議僅供參考。",
+      metrics: [`位置 ${position}`, `起手牌 ${advice.hand}`], evs: [],
+    };
     const callers = game.players.filter((player, index) => index !== 0 && !player.folded && player.streetBet === game.currentBet).length;
     let size = "";
     if (advice.action === "raise") size = `建議至 ${fmt(Math.min(maxTo, (2.5 + limpers) * (game.bigBlind ?? 1)))} ${game.tournamentFinishes ? "籌碼" : "BB"}`;
@@ -887,7 +905,7 @@ function aiMove(game: Game, actor: number, difficulty: Difficulty, field?: MttFi
   const toCall = Math.max(0, game.currentBet - seat.streetBet);
   const potOdds = toCall / Math.max(0.01, pot + toCall);
   const maxTo = seat.streetBet + seat.stack;
-  const canRaise = maxTo > game.currentBet;
+  const canRaise = mayRaise(game, actor);
   const opponents = game.players.filter((player, index) => index !== actor && !player.folded).length;
   const random = Math.random();
   const character = personality(actor);
@@ -1969,7 +1987,7 @@ export default function Home() {
   const toCall = Math.max(0, game.currentBet - hero.streetBet);
   const maxTo = hero.streetBet + hero.stack;
   const minTo = Math.min(maxTo, game.currentBet + game.minRaise);
-  const canRaise = canAct(hero) && maxTo > game.currentBet;
+  const canRaise = mayRaise(game, 0);
   const heroPosition = tablePosition(game, 0);
   const tableSize = game.players.length;
   const thinking = game.turn !== null && game.turn !== 0 && !game.finished ? game.players[game.turn].name : "";
@@ -2834,7 +2852,7 @@ export default function Home() {
           <div className="raise-control"><div className="raise-presets" aria-label="快捷下注尺度">
             {!facingRaise && game.street === "preflop" ? <><button disabled={!canRaise || game.turn !== 0} onClick={() => preset("open2")}>2BB</button><button disabled={!canRaise || game.turn !== 0} onClick={() => preset("open25")}>2.5BB</button><button disabled={!canRaise || game.turn !== 0} onClick={() => preset("open3")}>3BB</button></> : !facingRaise ? <><button disabled={!canRaise || game.turn !== 0} onClick={() => preset("half")}>½ 池</button><button disabled={!canRaise || game.turn !== 0} onClick={() => preset("pot")}>全池</button></> : <><button disabled={!canRaise || game.turn !== 0} onClick={() => preset("x2")}>×2</button><button disabled={!canRaise || game.turn !== 0} onClick={() => preset("x3")}>×3</button></>}
             <button className="preset-allin" disabled={!canRaise || game.turn !== 0} onClick={() => preset("allin")}>All-in</button>
-          </div><div className="raise-input-row"><input aria-label="加注額滑桿" type="range" min={minTo} max={Math.max(minTo, maxTo)} step="0.5" value={effectiveRaiseTo} disabled={!canRaise || game.turn !== 0} onChange={event => setRaiseTo(Number(event.target.value))} /><label>至 <input aria-label="輸入下注總額" type="number" inputMode="decimal" min={minTo} max={maxTo} step="0.5" value={raiseDraft ?? String(chip(effectiveRaiseTo))} disabled={!canRaise || game.turn !== 0} onFocus={() => setRaiseDraft(String(chip(effectiveRaiseTo)))} onChange={event => setRaiseDraft(event.target.value)} onBlur={() => { const value = Number(raiseDraft); if (raiseDraft?.trim() && Number.isFinite(value)) setRaiseTo(Math.max(minTo, Math.min(maxTo, chip(value)))); setRaiseDraft(null); }} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label></div><small className="raise-cost">今次投入 {fmt(Math.max(0, chip(effectiveRaiseTo) - hero.streetBet))} {isTournament ? "籌碼" : "BB"} · 合法範圍 {fmt(minTo)}–{fmt(maxTo)}</small></div>
+          </div><div className="raise-input-row"><input aria-label="加注額滑桿" type="range" min={minTo} max={Math.max(minTo, maxTo)} step="0.5" value={effectiveRaiseTo} disabled={!canRaise || game.turn !== 0} onChange={event => setRaiseTo(Number(event.target.value))} /><label>至 <input aria-label="輸入下注總額" type="number" inputMode="decimal" min={minTo} max={maxTo} step="0.5" value={raiseDraft ?? String(chip(effectiveRaiseTo))} disabled={!canRaise || game.turn !== 0} onFocus={() => setRaiseDraft(String(chip(effectiveRaiseTo)))} onChange={event => setRaiseDraft(event.target.value)} onBlur={() => { const value = Number(raiseDraft); if (raiseDraft?.trim() && Number.isFinite(value)) setRaiseTo(Math.max(minTo, Math.min(maxTo, chip(value)))); setRaiseDraft(null); }} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label></div><small className="raise-cost">今次投入 {fmt(Math.max(0, chip(effectiveRaiseTo) - hero.streetBet))} {isTournament ? "籌碼" : "BB"} · 合法範圍 {fmt(minTo)}–{fmt(maxTo)}{!canRaise && toCall > 0 && maxTo > game.currentBet ? " · 短碼全押未重新開放加注" : ""}</small></div>
           <button className="action primary" disabled={!canRaise || game.turn !== 0} onClick={() => { const target = Math.max(minTo, Math.min(maxTo, chip(effectiveRaiseTo))); if (target >= maxTo && !window.confirm(`確認 All-in？今次投入 ${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}。`)) return; heroAction("raise", target); }}>{game.currentBet === 0 ? "下注" : "加注至"} {fmt(chip(effectiveRaiseTo))}</button>
         </div>{visibleHint && <div className="gto-hint" aria-live="polite"><div className="hint-icon">✦</div><div className="hint-copy"><span>GTO COPILOT · 只用公開資訊</span><h3>{visibleHint.title}</h3><div className="hint-action-line"><strong>{visibleHint.action}</strong>{visibleHint.size && <b>{visibleHint.size}</b>}</div><p>{visibleHint.detail}</p><div className="hint-metrics">{visibleHint.metrics.map(metric => <i key={metric}>{metric}</i>)}</div></div><button className="hint-close" aria-label="關閉提示" onClick={() => setHint(null)}>×</button></div>}</> : <><div className="result-panel"><div className="result-copy"><span>{matchOver ? isTournament ? mtt && mttRemaining(mtt) > 1 ? "你已出局" : "錦標賽結束" : "牌桌結束" : "本手結束"}</span><strong>{game.message}</strong>{game.potSummary.map(line => <small key={line}>{line}</small>)}{autoNextHand && <small className="rebuy-notice">{quickFold && gameMode === "cash" ? "↻ 快速棄牌 · 結算後開下一手" : "↻ 範圍自動棄牌 · 約 2 秒後開下一手"}</small>}{autoSpectate && <small className="rebuy-notice">你已出局 · 正在完成其餘名次</small>}{studyMode && <small className="study-result-note">◉ Study Mode：已揭示包括muck牌在內嘅AI底牌</small>}{pendingRebuys.length > 0 && !matchOver && <small className="rebuy-notice">↻ {pendingRebuys.map(index => PLAYER_NAMES[index]).join("、")} 下一手自動 Re-buy 100BB</small>}{heroOut && <small className="rebuy-notice out-notice">{isTournament ? `你以第 ${heroPlace ?? "—"} 名出局${matchOver ? "" : "；AI將繼續決出冠軍"}` : career.cash?.id === game.tableId && career.balance < 100 * career.cash.bb ? "Bankroll 不足補碼；本桌已結算" : "你已用盡兩次 Re-buy，籌碼清零後正式 OUT"}</small>}{revealedAi.length > 0 && <div className="result-hands" aria-label="AI 翻開的底牌">{revealedAi.map(player => <div className={`result-hand ${player.folded ? "study-mucked" : ""}`} key={player.id}><b>{player.name}{player.folded ? " · Fold" : ""}</b><div>{player.hole.map((card, index) => <CardView key={index} card={card} mini />)}</div></div>)}</div>}{game.runoutBoards && game.runoutBoards.length > 1 && <div className="runout-boards">{game.runoutBoards.map((board, index) => <div key={index}><b>第 {index + 1} 次</b><span>{board.map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}{game.street === "showdown" && game.board.length === 5 && (game.runoutBoards?.length ?? 1) === 1 && <div className={`standard-winning-five ${visibleMotion?.winners.length ? "animate" : ""}`} aria-label="勝出玩家最佳五張牌">{game.winners.map(index => <div key={index}><b>{game.players[index].name} · {HAND_LABEL[bestScore([...game.players[index].hole, ...game.board])[0]]}</b><span>{aofBestFive([...game.players[index].hole, ...game.board]).map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}</div><button onClick={nextHand} disabled={!!mtt && mtt.handNo <= game.handNo}>{mtt && mtt.handNo <= game.handNo ? "全場結算中…" : matchOver ? "返回選桌" : pendingRebuys.includes(0) ? "Re-buy 100BB →" : "下一手 →"}</button></div>{isTournament && matchOver && <section className="tournament-final" aria-label="錦標賽最終排名"><h2>{mtt && mttRemaining(mtt) > 1 ? "目前名次 · 全場仍在進行" : "最終排名"}</h2><p>{tournamentPrizePool ? `獎池 ${tournamentPrizePool} C` : "虛擬獎勵總額 100 點"} · {TOURNAMENT_SPEEDS[tournamentSpeed].label}</p><ol>{(mtt ? mttStandings(mtt).map(entry => ({ seat: entry.id, place: entry.place })) : standings).filter(entry => !mtt || entry.place <= 30 || entry.seat === 0).map(entry => <li key={entry.seat} className={entry.seat === 0 ? "hero" : ""}><b>第 {entry.place} 名</b><span>{entry.seat === 0 ? "你" : mtt ? `AI ${entry.seat}` : PLAYER_NAMES[entry.seat]}</span><strong>{tournamentPrizePool ? `${fmt(mtt ? mttPrize(tournamentEntry, entry.place, mttStandings(mtt).map(item => item.place)) : prizeForPlace(entry.place, tableSize, standings) * tournamentPrizePool / 100)} C` : `${prizeForPlace(entry.place, tableSize, standings)} 點`}</strong></li>)}</ol></section>}</>}
       </div>
