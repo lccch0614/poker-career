@@ -1696,7 +1696,16 @@ function buildHandRecord(game: Game, decisions: CoachReview[], mode: GameMode): 
 function isSavedPokerState(value: unknown): value is SavedPokerState {
   if (!value || typeof value !== "object") return false;
   const state = value as Partial<SavedPokerState>;
-  return (state.version === 1 || state.version === 2) && !!state.game && Array.isArray(state.game.players) && Array.isArray(state.sessions) && Array.isArray(state.handHistory);
+  if ((state.version !== 1 && state.version !== 2) || !Number.isFinite(state.savedAt) || !state.game || !Array.isArray(state.game.players) || state.game.players.length < 2 || state.game.players.length > 8 || !Array.isArray(state.game.deck) || !Array.isArray(state.game.board) || !Array.isArray(state.sessions) || state.sessions.length < state.game.players.length || !Array.isArray(state.handHistory)) return false;
+  if (!state.game.players.every(player => player && typeof player === "object" && Number.isFinite(player.stack) && player.stack >= 0 && Array.isArray(player.hole))) return false;
+  if (!state.sessions.every(stats => stats && typeof stats === "object" && Number.isFinite(stats.hands))) return false;
+  if (!state.handHistory.every(hand => hand && typeof hand === "object" && typeof hand.id === "string" && Array.isArray(hand.frames))) return false;
+  return true;
+}
+
+function isRecoverablePokerState(value: unknown): value is SavedPokerState {
+  if (!isSavedPokerState(value)) return false;
+  try { restoreCareerWallet(value.career, value.version === 1); return true; } catch { return false; }
 }
 
 function HandFilterPanel({ filter, onChange, currentPosition, tableSize = 8 }: { filter: HandFilter; onChange: (next: HandFilter) => void; currentPosition?: TablePosition; tableSize?: number }) {
@@ -2111,9 +2120,9 @@ export default function Home() {
         let localCandidate: SavedPokerState | null = null;
         try {
           const local = cacheOwner.current && window.localStorage.getItem(`poker-local-save:${cacheOwner.current}`);
-          if (local) { const candidate: unknown = JSON.parse(local); if (isSavedPokerState(candidate)) localCandidate = candidate; }
+          if (local) { const candidate: unknown = JSON.parse(local); if (isRecoverablePokerState(candidate)) localCandidate = candidate; }
         } catch { /* Keep the cloud version when browser storage is unavailable. */ }
-        if (isSavedPokerState(payload.state)) {
+        if (isRecoverablePokerState(payload.state)) {
           if (localCandidate && localCandidate.savedAt > payload.state.savedAt + 1000) {
             setLocalRecovery(localCandidate);
             setCloudRecovery(payload.state);
@@ -2132,8 +2141,7 @@ export default function Home() {
         try {
           const raw = readSaveBackup().backup;
           const candidate: unknown = raw ? JSON.parse(raw) : null;
-          if (isSavedPokerState(candidate)) {
-            restoreCareerWallet(candidate.career, candidate.version === 1);
+          if (isRecoverablePokerState(candidate)) {
             damagedPrimary.current = true;
             setLocalRecovery(candidate);
           }
@@ -2738,8 +2746,7 @@ export default function Home() {
       if (saveInFlight.current || pendingSave.current) throw new Error("請等目前進度儲存完成後再匯入。");
       const expected = readSaveBackup();
       const candidate = await decodeSaveBackup(await file.text(), value => {
-        if (!isSavedPokerState(value) || !Number.isFinite(value.savedAt) || !value.game.players.length || !Array.isArray(value.game.deck) || !Array.isArray(value.game.board)) return false;
-        try { restoreCareerWallet(value.career, value.version === 1); return true; } catch { return false; }
+        return isRecoverablePokerState(value);
       });
       if (!isSavedPokerState(candidate)) throw new Error("備份格式不完整。");
       if (!window.confirm(`備份時間：${new Date(candidate.savedAt).toLocaleString("zh-HK")}。還原會取代目前進度，現有存檔會先保留喺本機。請先關閉其他遊戲分頁。確定繼續？`)) return;
