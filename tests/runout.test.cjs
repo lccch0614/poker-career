@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -183,3 +183,21 @@ assert.ok(Math.abs(forwardEv.adjustedDelta - reverseEv.adjustedDelta) < 1e-9);
 // Legacy saves with no runout list retain the single-board result.
 assert.equal(allInEvDelta({ ...evSplit, runoutBoards: undefined }).adjustedDelta,
   allInEvDelta({ ...evSplit, runoutBoards: [firstWin] }).adjustedDelta);
+
+// The hand review persists all runouts and pot breakdowns, without revealing them on earlier steps.
+const replayHand = showdown(pending, 2);
+const record = buildHandRecord(replayHand, [], 'cash');
+assert.deepEqual(record.runoutBoards, replayHand.runoutBoards);
+assert.notStrictEqual(record.runoutBoards[0], replayHand.runoutBoards[0]);
+const roundtrip = JSON.parse(JSON.stringify(record));
+const reviewProps = { history: [roundtrip], selectedId: roundtrip.id, studyMode: false, onStudyMode(){}, onSelect(){}, onReplay(){}, onToggleFavourite(){}, onClose(){} };
+const resultHtml = renderToStaticMarkup(React.createElement(HandReviewModal, { ...reviewProps, replayIndex: roundtrip.frames.length - 1 }));
+assert.ok(resultHtml.includes('多次發牌結果'));
+assert.ok(resultHtml.includes('第 1 次'));
+assert.ok(resultHtml.includes('第 2 次'));
+assert.ok(resultHtml.includes('底池結算詳情'));
+const earlyHtml = renderToStaticMarkup(React.createElement(HandReviewModal, { ...reviewProps, replayIndex: 0 }));
+assert.ok(!earlyHtml.includes('多次發牌結果'));
+assert.ok(!earlyHtml.includes('底池結算詳情'));
+const oldRecord = { ...roundtrip }; delete oldRecord.runoutBoards;
+assert.doesNotThrow(() => renderToStaticMarkup(React.createElement(HandReviewModal, { ...reviewProps, history: [oldRecord], replayIndex: oldRecord.frames.length - 1 })));
