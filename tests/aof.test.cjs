@@ -228,3 +228,44 @@ wallet = closeAof(wallet, 'test-aof', 12.5);
 assert.equal(wallet.balance, 2993);
 assert.equal(closeAof(wallet, 'test-aof', 12.5), null);
 assert.equal(restoreCareerWallet(JSON.parse(JSON.stringify(wallet))).balance, 2993);
+
+// Standard AOF keeps its table running after AI busts, with one paid 8BB
+// buy-in per player session and a fresh 8BB stack for a busted AI seat.
+let standardAof = newAof('standard');
+assert.equal(standardAof.variant, 'standard');
+assert.deepEqual(standardAof.lives, [1, 1, 1, 1]);
+let standardSteps = 0;
+while (!standardAof.game.finished && standardSteps++ < 8) standardAof = aofAct(standardAof, standardAof.game.turn, true);
+assert.equal(standardAof.game.finished, true);
+assert.equal(standardAof.runFinished, standardAof.game.players[0].stack <= 0);
+assert.ok(Math.abs(standardAof.game.players.reduce((sum, player) => sum + player.stack, 0) - 32) < 1e-8);
+const savedStandard = JSON.parse(JSON.stringify(standardAof));
+savedStandard.revealStep = 5;
+const standardNext = aofNextHand(savedStandard);
+assert.equal(standardNext.variant, 'standard');
+if (savedStandard.runFinished) {
+  assert.equal(standardNext.runNo, savedStandard.runNo + 1);
+  assert.deepEqual(standardNext.game.startingStacks, [8, 8, 8, 8]);
+} else {
+  assert.equal(standardNext.runNo, savedStandard.runNo);
+  assert.equal(standardNext.game.startingStacks[0], savedStandard.game.players[0].stack);
+  for (let i = 1; i < 4; i++) assert.equal(standardNext.game.startingStacks[i], savedStandard.game.players[i].stack || 8);
+}
+const standardMarkup = require('react-dom/server').renderToStaticMarkup(require('react').createElement(AofTable, { state: newAof('standard'), onChange(){}, onExit(){}, saveStatus:'已儲存' }));
+assert.ok(standardMarkup.includes('標準牌桌'));
+assert.ok(!standardMarkup.includes('aof-boss-panel'));
+const standardCarry = newAof('standard');
+standardCarry.game.finished = true;
+standardCarry.runFinished = false;
+[12, 0, 4, 0].forEach((stack, i) => { standardCarry.game.players[i].stack = stack; standardCarry.game.players[i].totalBet = 0; });
+const replenished = aofNextHand(JSON.parse(JSON.stringify(standardCarry)));
+assert.deepEqual(replenished.game.startingStacks, [12, 8, 4, 8]);
+assert.equal(replenished.runNo, standardCarry.runNo);
+const { newCareerWallet: newWallet, openAof: buyIn, closeAof: cashOut } = require('../app/career-bankroll.ts');
+let standardWallet = buyIn(newWallet(), 'standard-session', 1);
+assert.equal(standardWallet.balance, 2992);
+standardWallet = cashOut(standardWallet, 'standard-session', 7.75);
+assert.equal(standardWallet.balance, 2999.75);
+assert.equal(cashOut(standardWallet, 'standard-session', 7.75), null);
+standardWallet = buyIn(standardWallet, 'standard-next', 1);
+assert.equal(standardWallet.balance, 2991.75);
