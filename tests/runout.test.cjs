@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, showdown, shouldPlayStandardCinematic, StandardShowdown };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, showdown, shouldPlayStandardCinematic, StandardShowdown };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, showdown, shouldPlayStandardCinematic, StandardShowdown } = require('../app/page.tsx');
+const { newHand, act, mayRaise, showdown, shouldPlayStandardCinematic, StandardShowdown } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -64,3 +64,47 @@ const multiHtml = renderToStaticMarkup(React.createElement(StandardShowdown,{pre
 assert.ok(multiHtml.includes('切換自動揭牌'));
 assert.ok(!multiHtml.includes('class="standard-pot-result"'));
 assert.ok(!multiHtml.includes('退回未被跟注籌碼'));
+
+// A short all-in makes earlier callers respond, but does not reopen their raise.
+function bettingFixture(stacks, bet = 2, minRaise = 2) {
+  const base = newHand(stacks, 0, 71, () => .37);
+  return { ...base, street: 'flop', board: base.deck.slice(-3), currentBet: bet, minRaise,
+    players: base.players.map((p, i) => ({ ...p, stack: stacks[i], streetBet: 0, totalBet: 0, allIn: false, folded: false })),
+    pending: stacks.map(() => true), turn: 0, timeline: [], finished: false };
+}
+let short = bettingFixture([100, 3, 100, 100]);
+short = act(short, 0, 'checkcall');
+short = act(short, 1, 'raise', 3);
+assert.equal(short.currentBet, 3);
+assert.equal(short.minRaise, 2);
+assert.equal(short.turn, 2);
+assert.equal(mayRaise(short, 2), true); // Has not acted yet.
+short = act(short, 2, 'checkcall');
+short = act(short, 3, 'checkcall');
+assert.equal(short.turn, 0);
+assert.equal(mayRaise(short, 0), false);
+const beforeIllegal = short.players[0].stack;
+const afterIllegal = act(JSON.parse(JSON.stringify(short)), 0, 'raise', 20);
+assert.equal(afterIllegal.players[0].stack, beforeIllegal - 1); // Safely calls, never raises.
+assert.equal(afterIllegal.currentBet, 0); // Betting proceeds to the turn.
+assert.equal(afterIllegal.street, 'turn');
+
+// Two short all-ins can cumulatively reopen action for someone who faced both.
+let cumulative = bettingFixture([100, 3, 4, 100]);
+cumulative = act(cumulative, 0, 'checkcall');
+cumulative = act(cumulative, 1, 'raise', 3);
+cumulative = act(cumulative, 2, 'raise', 4);
+cumulative = act(cumulative, 3, 'checkcall');
+assert.equal(cumulative.turn, 0);
+assert.equal(mayRaise(cumulative, 0), true);
+cumulative = act(cumulative, 0, 'raise', 6);
+assert.equal(cumulative.currentBet, 6);
+assert.equal(cumulative.players[0].streetBet, 6);
+
+// A player who checked may raise an incomplete opening all-in.
+let checked = bettingFixture([100, .5, 100], 0, 1);
+checked = act(checked, 0, 'checkcall');
+checked = act(checked, 1, 'raise', .5);
+checked = act(checked, 2, 'checkcall');
+assert.equal(checked.turn, 0);
+assert.equal(mayRaise(checked, 0), true);
