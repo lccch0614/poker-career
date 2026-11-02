@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -201,3 +201,18 @@ assert.ok(!earlyHtml.includes('多次發牌結果'));
 assert.ok(!earlyHtml.includes('底池結算詳情'));
 const oldRecord = { ...roundtrip }; delete oldRecord.runoutBoards;
 assert.doesNotThrow(() => renderToStaticMarkup(React.createElement(HandReviewModal, { ...reviewProps, history: [oldRecord], replayIndex: oldRecord.frames.length - 1 })));
+
+// Uncontested pots do not expose the winner's hole cards outside Study mode.
+assert.equal(opponentHoleVisible(true, 'preflop', false, false), false);
+assert.equal(opponentHoleVisible(true, 'river', false, false), false);
+assert.equal(opponentHoleVisible(true, 'showdown', false, false), true);
+assert.equal(opponentHoleVisible(true, 'showdown', true, false), false);
+assert.equal(opponentHoleVisible(true, 'river', false, true), true);
+assert.equal(opponentHoleVisible(false, 'river', false, true), false);
+const uncontested = act(newHand([20, 20], 0, 201, () => .41), 0, 'fold');
+const uncontestedRecord = buildHandRecord(uncontested, [], 'cash');
+const uncontestedProps = { ...reviewProps, history: [uncontestedRecord], selectedId: uncontestedRecord.id, replayIndex: uncontestedRecord.frames.length - 1 };
+const hiddenHtml = renderToStaticMarkup(React.createElement(HandReviewModal, uncontestedProps));
+assert.ok(!hiddenHtml.includes('class="replay-showdown"><div'));
+const studyHtml = renderToStaticMarkup(React.createElement(HandReviewModal, { ...uncontestedProps, studyMode: true }));
+assert.ok(studyHtml.includes('class="replay-showdown"><div'));
