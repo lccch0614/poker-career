@@ -208,7 +208,7 @@ function newHand(stacks: number[], requestedButton: number, handNo: number, rng:
   const turn = findNext(players, bb, (_, index) => pending[index]);
   const initialAllIns = players.filter(player => !player.folded && player.allIn);
   const game: Game = {
-    handNo, button, sb, bb, players, deck, board: [], street: "preflop", currentBet: tournamentFinishes ? Math.max(bigBlind, players[sb].streetBet, players[bb].streetBet) : Math.max(players[sb].streetBet, players[bb].streetBet),
+    handNo, button, sb, bb, players, deck, board: [], street: "preflop", currentBet: Math.max(bigBlind, players[sb].streetBet, players[bb].streetBet),
     minRaise: bigBlind, pending, turn, finished: false, message: `${players[button].name} 在莊位`,
     log: [`第 ${handNo} 手 · ${players[button].name} 是莊家`], winners: [], potSummary: [], actionId: 0, preflopRaises: 0,
     startingStacks: [...stacks], handTrackers: players.map(() => emptyHandTracker()),
