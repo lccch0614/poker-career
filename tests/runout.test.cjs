@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -263,3 +263,20 @@ assert.equal(isRecoverablePokerState({ ...saveFixture, sessions: [null, {hands:0
 assert.equal(isRecoverablePokerState({ ...saveFixture, handHistory: [null] }), false);
 assert.equal(isRecoverablePokerState({ ...saveFixture, career: {version:1,balance:1,transactions:[]} }), false);
 assert.equal(isRecoverablePokerState({ ...saveFixture, version:1, career:undefined }), true);
+
+// Decorative card backs are hidden from accessibility APIs; exposed cards carry their value.
+const backHtml = renderToStaticMarkup(React.createElement(CardView, {card: card(14,'s'), hidden: true, mini: true}));
+assert.match(backHtml, /role="img" aria-label="隱藏的牌"/);
+assert.match(backHtml, /aria-hidden="true">8/);
+assert.ok(!backHtml.includes('A♠'));
+const faceHtml = renderToStaticMarkup(React.createElement(CardView, {card: card(14,'s'), mini: true}));
+assert.ok(faceHtml.includes('aria-label="A♠"'));
+
+// Flights follow actual pot-by-pot shares and identify unmatched refunds.
+const flights = settlementFlights(tieResult.showdownAwards);
+assert.deepEqual(flights.map(f => f.seat), [0,1,2,1,2,2]);
+assert.deepEqual(flights.map(f => f.order), [0,0,0,1,1,2]);
+assert.ok(Math.abs(flights.reduce((sum,f) => sum+f.amount,0)-90) < 1e-9);
+const returned = awardUncontested({ ...tieBase, bb: 0, bigBlindAntePaid: 0, players: tieBase.players.map((p,i) => ({ ...p, stack: [19,18,17,20][i], totalBet: [11,2,3,0][i], folded: i !== 0 })) }, 0);
+assert.deepEqual(settlementFlights(returned.showdownAwards).map(f => [f.seat,f.amount,f.refund]), [[0,8,false],[0,8,true]]);
+assert.deepEqual(settlementFlights(undefined), []);
