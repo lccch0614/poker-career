@@ -2245,12 +2245,12 @@ export default function Home() {
         wonShowdown: sawShowdown && game.winners.includes(index),
       });
     }));
-    // Fixed-name Cash opponents keep a profile across sessions; MTT seats represent different players.
-    if (gameMode === "cash") setOpponentProfiles(previous => {
+    // Fixed-name Cash and single-table opponents use separate profiles; MTT seats can change identity.
+    if (!game.mttSeatIds) setOpponentProfiles(previous => {
       const next = { ...previous };
       game.players.forEach((player, index) => {
         if (index === 0 || game.startingStacks[index] <= 0) return;
-        const key = `ai:${index}`;
+        const key = `${gameMode === "cash" ? "ai" : "sng"}:${index}`;
         const sawShowdown = game.street === "showdown" && !player.folded;
         next[key] = recordOpponentProfile(next[key], handKey, game.handTrackers[index], sawShowdown, game.winners.includes(index));
       });
@@ -2626,7 +2626,8 @@ export default function Home() {
 
   const session = sessions[0];
   const selectedStats = sessions[selectedSeat];
-  const selectedCareerProfile = !isTournament && selectedSeat > 0 ? opponentProfiles[`ai:${selectedSeat}`] : undefined;
+  const selectedCareerKey = selectedSeat > 0 && !game.mttSeatIds ? `${isTournament ? "sng" : "ai"}:${selectedSeat}` : null;
+  const selectedCareerProfile = selectedCareerKey ? opponentProfiles[selectedCareerKey] : undefined;
   const percent = (part: number, total = selectedStats.hands) => statPercent(part, total);
   const coachScore = session.decisions ? Math.round(session.coachPoints / session.decisions) : 0;
   const coachLetter = coachScore >= 90 ? "A" : coachScore >= 80 ? "B" : coachScore >= 68 ? "C" : coachScore >= 55 ? "D" : session.decisions ? "F" : "—";
@@ -2912,8 +2913,8 @@ export default function Home() {
         <section className="session-panel">
           <div className="panel-title"><h2>SESSION · {PLAYER_NAMES[selectedSeat]}</h2><button onClick={() => { setSessions(PLAYER_NAMES.slice(0, tableSize).map(() => emptySessionStats())); setCoachReviews([]); setProfitHistory([]); }}>全部重設</button></div>
           {selectedSeat !== 0 && <div className="ai-profile"><div className="ai-profile-mark">{selectedSeat}</div><div><small>對手傾向</small><b>{selectedProfile}</b><span>{selectedStats.hands} 手樣本 · 建議至少 20 手</span></div></div>}
-          {selectedSeat !== 0 && !isTournament && <div className="coach-card opponent-card" aria-label="對手長期觀察"><span>長期觀察 · 跨 Cash 牌桌</span><p>{selectedCareerProfile ? `${selectedCareerProfile.hands} 手 · VPIP ${statPercent(selectedCareerProfile.vpipHands, selectedCareerProfile.hands)}% · PFR ${statPercent(selectedCareerProfile.pfrHands, selectedCareerProfile.hands)}% · 3-bet ${statPercent(selectedCareerProfile.threeBetHands, selectedCareerProfile.threeBetOpportunities)}%` : "由本次更新後開始記錄；樣本愈多，參考價值愈高。"}</p></div>}
-          {selectedSeat !== 0 && !isTournament && <label className="opponent-note"><span>個人備註 · 自動保存</span><textarea aria-label={`${game.players[selectedSeat].name} 個人備註`} maxLength={160} placeholder="例如：翻牌前喜歡加注" value={selectedCareerProfile?.note ?? ""} onChange={event => { const value = event.target.value; const key = `ai:${selectedSeat}`; setOpponentProfiles(previous => ({ ...previous, [key]: updateOpponentNote(previous[key], value) })); }} /><small>{(selectedCareerProfile?.note ?? "").length} / 160</small></label>}
+          {selectedCareerKey && <div className="coach-card opponent-card" aria-label="對手長期觀察"><span>長期觀察 · {isTournament ? "跨單桌賽" : "跨 Cash 牌桌"}</span><p>{selectedCareerProfile ? `${selectedCareerProfile.hands} 手 · VPIP ${statPercent(selectedCareerProfile.vpipHands, selectedCareerProfile.hands)}% · PFR ${statPercent(selectedCareerProfile.pfrHands, selectedCareerProfile.hands)}% · 3-bet ${statPercent(selectedCareerProfile.threeBetHands, selectedCareerProfile.threeBetOpportunities)}%` : "由本次更新後開始記錄；樣本愈多，參考價值愈高。"}</p></div>}
+          {selectedCareerKey && <label className="opponent-note"><span>個人備註 · {isTournament ? "單桌賽" : "Cash"} · 自動保存</span><textarea aria-label={`${game.players[selectedSeat].name} 個人備註`} maxLength={160} placeholder="例如：翻牌前喜歡加注" value={selectedCareerProfile?.note ?? ""} onChange={event => { const value = event.target.value; const key = selectedCareerKey; setOpponentProfiles(previous => ({ ...previous, [key]: updateOpponentNote(previous[key], value) })); }} /><small>{(selectedCareerProfile?.note ?? "").length} / 160</small></label>}
           <div className="stats-grid">
             <div><span>手數</span><b>{selectedStats.hands}</b></div><div><span>盈虧</span><b className={selectedStats.profit >= 0 ? "positive" : "negative"}>{selectedStats.profit >= 0 ? "+" : ""}{fmt(selectedStats.profit)} {isTournament ? "籌碼" : "BB"}</b></div>
             <div><span>VPIP</span><b>{percent(selectedStats.vpipHands)}%</b></div><div><span>PFR</span><b>{percent(selectedStats.pfrHands)}%</b></div>

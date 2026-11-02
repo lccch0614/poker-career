@@ -92,8 +92,8 @@ export type OpponentProfile = {
 export function restoreOpponentProfiles(value: unknown): Record<string, OpponentProfile> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const profiles: Record<string, OpponentProfile> = {};
-  for (let seat = 1; seat <= 7; seat++) {
-    const key = `ai:${seat}`;
+  for (const mode of ['ai', 'sng']) for (let seat = 1; seat <= 7; seat++) {
+    const key = `${mode}:${seat}`;
     const raw = (value as Record<string, unknown>)[key];
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const record = raw as Record<string, unknown>;
