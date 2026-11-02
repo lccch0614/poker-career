@@ -1224,16 +1224,22 @@ function aofHandHighlights(game: Game, livesBefore: number[], livesAfter: number
   return entries;
 }
 
-function aofAct(state: AofState, actor: number, jam: boolean): AofState {
+function aofAct(state: AofState, actor: number | null, jam: boolean): AofState {
   const before = state.game;
   if (before.finished || before.turn !== actor) return state;
-  const facing = aofFacingAllIn(before,actor);
   const stats = state.stats.map(s => ({ ...s }));
-  const s = stats[actor];
-  if (facing) { s.callOpportunities++; if (jam) s.calls++; }
-  else { s.pushOpportunities++; if (jam) s.pushes++; }
-  const shoveTo = before.players[actor].streetBet+before.players[actor].stack;
-  const game = act(before, actor, jam ? shoveTo > before.currentBet ? "raise" : "checkcall" : "fold", shoveTo+1);
+  let game: Game;
+  if (actor === null) {
+    if (before.players.filter(player => !player.folded).length < 2 || before.players.some(canAct)) return state;
+    game = showdown(before);
+  } else {
+    const facing = aofFacingAllIn(before,actor);
+    const s = stats[actor];
+    if (facing) { s.callOpportunities++; if (jam) s.calls++; }
+    else { s.pushOpportunities++; if (jam) s.pushes++; }
+    const shoveTo = before.players[actor].streetBet+before.players[actor].stack;
+    game = act(before, actor, jam ? shoveTo > before.currentBet ? "raise" : "checkcall" : "fold", shoveTo+1);
+  }
   if (!game.finished) return { ...state, game, stats, foldReveal: false };
   stats.forEach((item,index) => {
     if (game.startingStacks[index] <= 0) return;
@@ -1411,6 +1417,10 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
     update(); media.addEventListener("change",update);
     return () => { media.removeEventListener("change",update); void audioRef.current?.close(); };
   }, []);
+  useEffect(() => {
+    if (game.finished || game.turn !== null || game.players.some(canAct) || game.players.filter(player => !player.folded).length < 2) return;
+    onChange(aofAct(state, null, false));
+  }, [state, game, onChange]);
   useEffect(() => {
     if (game.finished || game.turn === null || game.turn === 0) return;
     const actor = game.turn;
@@ -2122,6 +2132,11 @@ export default function Home() {
     timedOutTurn.current = tournamentTurnKey;
     heroAction(game.currentBet > game.players[0].streetBet ? "fold" : "checkcall");
   }, [timedTurnActive, tournamentTurnKey, tournamentClock?.remainingMs]);
+
+  useEffect(() => {
+    if (!restoreReady || !started || aofOpen || game.finished || game.runoutPending || game.turn !== null || game.players.some(canAct) || game.players.filter(player => !player.folded).length < 2) return;
+    setGame(previous => !previous.finished && !previous.runoutPending && previous.turn === null && !previous.players.some(canAct) && previous.players.filter(player => !player.folded).length >= 2 ? showdown(previous) : previous);
+  }, [restoreReady, started, aofOpen, game]);
 
   useEffect(() => {
     if (!restoreReady || !started || aofOpen || game.turn === null || game.turn === 0 || game.finished) return;
