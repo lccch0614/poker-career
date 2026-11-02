@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -228,4 +228,15 @@ for (const stack of [10.1, 10.2, 10.3, 10.4]) {
   assert.equal(fractional.players[0].allIn, true);
   assert.ok(Math.abs(fractional.players[0].totalBet - stack) < 1e-9);
   assert.ok(Math.abs(fractional.players.reduce((sum, p) => sum + p.stack + p.totalBet, 0) - stack - 20) < 1e-9);
+}
+
+// Uncalled wagers are returned separately from the contested pot; chips stay conserved.
+for (const ante of [0, 1]) {
+  const base = newHand([100, 100, 100], 0, 230, () => .31, [0,0,0], 'refund', 0, .5, 1, 0, ante ? [] : undefined);
+  const fixture = { ...base, bb: 0, bigBlindAntePaid: ante, players: base.players.map((p, i) => ({ ...p, stack: [89 - ante, 98, 97][i], totalBet: [11 + ante, 2, 3][i], streetBet: [11, 2, 3][i], folded: i !== 0 })) };
+  const result = awardUncontested(fixture, 0);
+  assert.equal(result.players[0].stack, 105);
+  assert.match(result.potSummary[0], ante ? /底池 9 籌碼/ : /底池 8BB/);
+  assert.match(result.potSummary[1], ante ? /退回未被跟注籌碼 8 籌碼/ : /退回未被跟注籌碼 8BB/);
+  assert.ok(Math.abs(result.players.reduce((sum, p) => sum + p.stack, 0) - 300) < 1e-9);
 }
