@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -253,3 +253,13 @@ assert.ok(Math.abs(tieResult.players[1].stack - (40/3 + 15)) < 1e-9);
 assert.ok(Math.abs(tieResult.players[2].stack - (40/3 + 35)) < 1e-9);
 assert.equal(tieResult.players[3].stack, 0);
 assert.ok(Math.abs(tieResult.players.reduce((sum,p) => sum+p.stack,0)-90) < 1e-9);
+
+// Reject structurally damaged backups before replacing a valid save.
+const saveFixture = { version: 2, savedAt: Date.now(), game: newHand([20,20],0,250,()=>.4), sessions: [{hands:0},{hands:0}], handHistory: [], career: {version:1,balance:3000,transactions:[]} };
+assert.equal(isRecoverablePokerState(saveFixture), true);
+assert.equal(isRecoverablePokerState({ ...saveFixture, game: { ...saveFixture.game, players: [null, saveFixture.game.players[1]] } }), false);
+assert.equal(isRecoverablePokerState({ ...saveFixture, game: { ...saveFixture.game, deck: null } }), false);
+assert.equal(isRecoverablePokerState({ ...saveFixture, sessions: [null, {hands:0}] }), false);
+assert.equal(isRecoverablePokerState({ ...saveFixture, handHistory: [null] }), false);
+assert.equal(isRecoverablePokerState({ ...saveFixture, career: {version:1,balance:1,transactions:[]} }), false);
+assert.equal(isRecoverablePokerState({ ...saveFixture, version:1, career:undefined }), true);
