@@ -8,7 +8,7 @@ import { getPreflopAdvice, getTablePosition, positionOpenPercent, type TablePosi
 import { RANGE_POSITIONS, RANGE_RANKS, handsForPosition, positionRangePresets, rangeCell, rangePercent, rangePreset, restoreHandFilter, shouldAutoFold, wasAutoFolded, type HandFilter } from "./hand-filter";
 import { emptyHandTracker, emptySessionStats, settlePlayerSession, statPercent, trackPreflopAction, type PlayerHandTracker, type PlayerSessionStats } from "./session-stats";
 import { TOURNAMENT_BLINDS, TOURNAMENT_SPEEDS, handsUntilBlindUp, payoutShares, potsWithBigBlindAnte, prizeForPlace, recordTournamentFinishes, tournamentBigBlindAnte, tournamentBlinds, tournamentCanContinue, tournamentLevel, tournamentPhase, tournamentStandings, type TournamentFinish, type TournamentSpeed } from "./tournament";
-import { AOF_BIG_BLINDS, CASH_BIG_BLINDS, TOURNAMENT_ENTRIES, buyAofLife, careerStakeRisk, cashCannotRebuy, closeAof, closeCash, newCareerWallet, openAof, openCash, openTournament, rebuyCash, restoreCareerWallet, settleTournament, type CareerWallet, type CareerStakeRisk } from "./career-bankroll";
+import { AOF_BIG_BLINDS, CASH_BIG_BLINDS, TOURNAMENT_ENTRIES, aofContinuationStake, buyAofLife, careerStakeRisk, cashCannotRebuy, closeAof, closeCash, newCareerWallet, openAof, openCash, openTournament, rebuyCash, restoreCareerWallet, settleTournament, type CareerWallet, type CareerStakeRisk } from "./career-bankroll";
 import { MTT_BACKGROUND_INTERVAL_MS, MTT_ENTRIES, MTT_LEVEL_MS, MTT_PAID, completeMttBatch, completeMttRound, isMttField, mttAverage, mttClockTick, mttElapsed, mttLevel, mttPayoutShares, mttPrize, mttRemaining, mttStandings, newMttField, rebalanceMttField, restoreMttField, type MttField, type MttHighlight } from "./mtt-field";
 import { extendDecisionClock, newDecisionClock, pauseDecisionClock, restoreDecisionClock, tickDecisionClock, type TournamentDecisionClock } from "./tournament-clock";
 import { saveKeepalive } from "./save-transport";
@@ -2368,15 +2368,21 @@ export default function Home() {
     setCareer(next);
   }
 
-  function applyAofState(next: AofState) {
+  function applyAofState(next: AofState, selectedStake?: number) {
     const previous = aofRef.current;
     let wallet = careerRef.current;
     const newRun = !!previous && (next.runNo ?? 1) !== (previous.runNo ?? 1);
     if (newRun) {
       if (!previous!.game.finished || aofPresentation(previous!).revealing) { setBankrollMessage("請先完成本手及揭牌，然後再開始新 Run。"); return; }
-      if (wallet.aof) wallet = closeAof(wallet, wallet.aof.id, previous!.game.players[0].stack) ?? wallet;
-      const opened = openAof(wallet, `${next.game.tableId}:${next.runNo ?? 1}`, lobbyAofBb);
-      if (!opened) { setBankrollMessage(`新 AOF Run 需要 ${8 * lobbyAofBb} C；目前餘額不足。`); return; }
+      const previousId = `${previous!.game.tableId}:${previous!.runNo ?? 1}`;
+      const stake = selectedStake ?? aofContinuationStake(wallet, previousId, lobbyAofBb);
+      if (wallet.aof) {
+        const closed = closeAof(wallet, previousId, previous!.game.players[0].stack);
+        if (!closed) { setBankrollMessage("未能結算目前 AOF 牌桌；請重新載入後再試。"); return; }
+        wallet = closed;
+      }
+      const opened = openAof(wallet, `${next.game.tableId}:${next.runNo ?? 1}`, stake);
+      if (!opened) { setBankrollMessage(`新 AOF 牌桌需要 ${8 * stake} C；目前餘額不足。`); return; }
       wallet = opened;
     } else if (previous && wallet.aof && next.game.handNo !== previous.game.handNo && previous.game.players[0].stack <= 0 && next.game.startingStacks[0] > 0) {
       const paid = buyAofLife(wallet, wallet.aof.id);
@@ -2654,7 +2660,7 @@ export default function Home() {
     const previous = aof;
     if (!previous.game.finished || aofPresentation(previous).revealing) { setBankrollMessage("請先完成目前牌局及揭牌，再開始新 Run。"); return; }
     const next = { ...aofRestartRun(previous), variant: lobbyAofVariant, lives: lobbyAofVariant === "standard" ? [1,1,1,1] : [3,3,3,3], bossActive: false, bossStage: 0 };
-    applyAofState(next);
+    applyAofState(next, lobbyAofBb);
     if (aofRef.current === next) { setEntryView("table"); setAofOpen(true); }
   };
   const chooseMode = (mode: "cash" | "tournament" | "aof") => { setSetupMode(mode); if (mode !== "aof") setLobbyGameMode(mode); setEntryView("setup"); setStarted(false); setHint(null); setBankrollMessage(""); };

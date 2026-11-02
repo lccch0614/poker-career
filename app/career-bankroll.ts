@@ -119,6 +119,14 @@ export function openAof(wallet: CareerWallet, id: string, bb: number): CareerWal
   return paid && { ...paid, aof: { id, bb, livesPaid: 1 } };
 }
 
+/** Continue an existing AOF session at its paid stake, even after settlement. */
+export function aofContinuationStake(wallet: CareerWallet, id: string, fallback: number): number {
+  if (wallet.aof?.id === id) return wallet.aof.bb;
+  const paid = wallet.transactions.find(entry => entry.id === `aof:${id}:life:1` && entry.mode === "aof" && entry.sessionId === id);
+  const stake = paid ? -paid.amount / 8 : fallback;
+  return AOF_BIG_BLINDS.includes(stake as typeof AOF_BIG_BLINDS[number]) ? stake : fallback;
+}
+
 export function buyAofLife(wallet: CareerWallet, id: string): CareerWallet | null {
   const session = wallet.aof;
   if (!session || session.id !== id || session.livesPaid >= 3) return null;
