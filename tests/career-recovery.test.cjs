@@ -26,3 +26,12 @@ aof = buyAofLife(restored(aof), 'aof-reload');
 aof = closeAof(restored(aof), 'aof-reload', 12);
 assert.equal(closeAof(restored(aof), 'aof-reload', 12), null);
 assert.deepEqual(restored(aof), aof);
+
+// Changing the lobby selection cannot silently change the stake of an active
+// AOF table; continuation after a bust derives it from the settled buy-in.
+const { aofContinuationStake } = require('../app/career-bankroll.ts');
+let higherStake = openAof(newCareerWallet(), 'stake-locked', 5);
+assert.equal(aofContinuationStake(higherStake, 'stake-locked', 1), 5);
+higherStake = closeAof(higherStake, 'stake-locked', 0);
+assert.equal(aofContinuationStake(restored(higherStake), 'stake-locked', 1), 5);
+assert.equal(aofContinuationStake(higherStake, 'legacy', 2), 2);
