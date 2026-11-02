@@ -54,7 +54,7 @@ type HandRecord = {
   id: string; handNo: number; completedAt: number; tableSize: number; favourite: boolean;
   heroHole: Card[]; playerHoles: Card[][]; finalFolded: boolean[]; board: Card[];
   winners: number[]; message: string; potSummary: string[]; frames: HandFrame[];
-  decisions: CoachReview[]; aiDecisions?: AiStudyDecision[]; actualProfit: number; allInEvProfit: number;
+  decisions: CoachReview[]; aiDecisions?: AiStudyDecision[]; actualProfit: number; allInEvProfit: number; unit?: "BB" | "籌碼";
 };
 type SavedPokerState = {
   aof?: AofState; aofOpen?: boolean;
@@ -248,9 +248,9 @@ function awardUncontested(game: Game, winner: number) {
   const settledBets = game.players.map(player => player.totalBet);
   const players = game.players.map(player => ({ ...player, streetBet: 0, totalBet: 0 }));
   players[winner].stack += amount;
-  players[winner].lastAction = `贏得 ${fmt(amount)}BB`;
+  players[winner].lastAction = `贏得 ${fmt(amount)}${game.tournamentFinishes ? " 籌碼" : "BB"}`;
   const tournamentFinishes = game.tournamentFinishes ? recordTournamentFinishes(game.tournamentFinishes, game.startingStacks, players.map(player => player.stack), game.handNo) : undefined;
-  return addLog({ ...game, players, settledBets, tournamentFinishes, pending: players.map(() => false), turn: null, finished: true, winners: [winner], potSummary: [`底池 ${fmt(amount)}BB：${players[winner].name}`] }, `${players[winner].name} 贏得 ${fmt(amount)}BB`);
+  return addLog({ ...game, players, settledBets, tournamentFinishes, pending: players.map(() => false), turn: null, finished: true, winners: [winner], potSummary: [`底池 ${fmt(amount)}${game.tournamentFinishes ? " 籌碼" : "BB"}：${players[winner].name}`] }, `${players[winner].name} 贏得 ${fmt(amount)}${game.tournamentFinishes ? " 籌碼" : "BB"}`);
 }
 
 function showdown(game: Game, runs = 1): Game {
@@ -285,17 +285,17 @@ function showdown(game: Game, runs = 1): Game {
         if (!refund) contestedAwards[index] += share;
       });
       showdownAwards.push({ run, layer: layerIndex, amount: layer.amount / runs, winners: [...winners], share: layer.amount / runs / winners.length, refund });
-      summaries.push(`${runs > 1 ? `第 ${run + 1} 次 · ` : ""}${refund ? "退回未被跟注籌碼" : layerIndex === 0 ? "主池" : `邊池 ${layerIndex}`} ${fmt(layer.amount / runs)}BB：${winners.map(index => game.players[index].name).join("、")}`);
+      summaries.push(`${runs > 1 ? `第 ${run + 1} 次 · ` : ""}${refund ? "退回未被跟注籌碼" : layerIndex === 0 ? "主池" : `邊池 ${layerIndex}`} ${fmt(layer.amount / runs)}${game.tournamentFinishes ? " 籌碼" : "BB"}：${winners.map(index => game.players[index].name).join("、")}`);
     });
   });
   const players = game.players.map((player, index) => ({
     ...player, stack: player.stack + awards[index], streetBet: 0, totalBet: 0,
-    lastAction: awards[index] > 0 ? `+${fmt(awards[index])}BB` : player.lastAction,
+    lastAction: awards[index] > 0 ? `+${fmt(awards[index])}${game.tournamentFinishes ? " 籌碼" : "BB"}` : player.lastAction,
   }));
   const winners = contestedAwards.map((amount, index) => amount > 0 ? index : -1).filter(index => index >= 0);
   const lead = winners.sort((a, b) => contestedAwards[b] - contestedAwards[a])[0];
   const leadHand = lead === undefined || runs > 1 ? "" : `以${HAND_LABEL[(scores[lead] ?? [0])[0]]}`;
-  const message = lead === undefined ? "牌局結束" : `${players[lead].name}${leadHand}贏得 ${fmt(contestedAwards[lead])}BB${winners.length > 1 ? "（另有分池）" : ""}`;
+  const message = lead === undefined ? "牌局結束" : `${players[lead].name}${leadHand}贏得 ${fmt(contestedAwards[lead])}${game.tournamentFinishes ? " 籌碼" : "BB"}${winners.length > 1 ? "（另有分池）" : ""}`;
   const tournamentFinishes = game.tournamentFinishes ? recordTournamentFinishes(game.tournamentFinishes, game.startingStacks, players.map(player => player.stack), game.handNo) : undefined;
   return addLog({ ...game, ...completed, runoutPending: false, runoutBoards: boards, players, settledBets, tournamentFinishes, street: "showdown", pending: players.map(() => false), turn: null, finished: true, winners, potSummary: summaries, showdownAwards }, message);
 }
@@ -436,7 +436,7 @@ function act(game: Game, actor: number, action: "fold" | "checkcall" | "raise", 
     const paid = Math.min(toCall, seat.stack);
     seat.stack -= paid; seat.streetBet += paid; seat.totalBet += paid; seat.allIn = seat.stack === 0; pending[actor] = false;
     seat.lastAction = paid === 0 ? "過牌" : seat.allIn ? `ALL-IN ${fmt(seat.streetBet)}` : `跟注 ${fmt(paid)}`;
-    line = paid === 0 ? `${seat.name} 過牌` : `${seat.name}${seat.allIn ? "全押" : "跟注"} ${fmt(paid)}BB`;
+    line = paid === 0 ? `${seat.name} 過牌` : `${seat.name}${seat.allIn ? "全押" : "跟注"} ${fmt(paid)}${game.tournamentFinishes ? " 籌碼" : "BB"}`;
   } else {
     const maxTo = seat.streetBet + seat.stack;
     const minimum = Math.min(maxTo, currentBet + minRaise);
@@ -448,7 +448,7 @@ function act(game: Game, actor: number, action: "fold" | "checkcall" | "raise", 
     if (game.street === "preflop") preflopRaises += 1;
     pending = players.map((player, index) => index !== actor && canAct(player));
     seat.lastAction = `${seat.allIn ? "ALL-IN" : game.currentBet === 0 ? "下注" : "加注"} ${fmt(target)}`;
-    line = `${seat.name}${seat.allIn ? "全押至" : game.currentBet === 0 ? "下注" : "加注至"} ${fmt(target)}BB`;
+    line = `${seat.name}${seat.allIn ? "全押至" : game.currentBet === 0 ? "下注" : "加注至"} ${fmt(target)}${game.tournamentFinishes ? " 籌碼" : "BB"}`;
   }
   let allInBoard = game.allInBoard;
   let allInCap = game.allInCap;
@@ -1590,7 +1590,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
     </section>
     <section className="aof-panel aof-rewards"><div className="aof-reward-head"><div><span>外觀獎勵</span><h2>娛樂等級 {Math.floor(xp/25)+1}</h2></div><strong>{xp} XP</strong></div><div className="aof-xp-track"><i style={{ width: `${rewardProgress}%` }} /></div><p>{nextTheme ? `再取得 ${nextTheme.unlock-xp} XP 解鎖「${nextTheme.label}」` : "所有牌桌主題已解鎖"}</p><div className="aof-theme-picker">{AOF_THEMES.map(item => { const available = unlocked.includes(item.id); return <button key={item.id} disabled={!available} aria-pressed={theme === item.id} onClick={() => available && onChange({ ...state, theme: item.id })}>{available ? item.label : `${item.unlock} XP`}</button>; })}</div></section>
     <section className="aof-panel aof-highlights"><div className="aof-reward-head"><div><span>SESSION REEL</span><h2>牌局精華</h2></div><strong>{(state.highlights ?? []).length}</strong></div>{(state.highlights ?? []).length ? <div>{(state.highlights ?? []).slice(0,6).map(item => <article className={item.tone} key={item.id}><b>#{item.hand}</b><span><strong>{item.title}</strong><small>{item.detail}</small></span></article>)}</div> : <p>完成牌局後，反勝、多人 All-in、罕見牌型及出局時刻會自動收錄。</p>}</section>
-    <section className="aof-panel"><h2>AOF Session</h2><p>實際 {fmt(latest?.actual ?? 0)}BB · All-in EV {fmt(latest?.allInEv ?? 0)}BB{revealing ? " · 揭牌後更新" : ""}</p><ProfitChart points={view.profits} /><div className="aof-stats"><table><thead><tr><th>玩家</th><th>手數</th><th>盈虧 BB</th><th>推牌率</th><th>跟全押率</th></tr></thead><tbody>{stats.map((s,i) => <tr key={i}><td>{PLAYER_NAMES[i]}</td><td>{s.hands}</td><td>{fmt(s.profit)}</td><td>{s.pushOpportunities ? `${statPercent(s.pushes,s.pushOpportunities)}%` : "—"}</td><td>{s.callOpportunities ? `${statPercent(s.calls,s.callOpportunities)}%` : "—"}</td></tr>)}</tbody></table></div><p>推牌率只計未有人全押嘅機會；跟全押率只計面對全押嘅機會。{standard ? "對手爆倉後補回 8BB；你爆倉後可再買入。" : "每條命爆倉後補回8BB，補碼本身不計盈虧。"}標準桌統計不受影響。</p></section>
+    <section className="aof-panel"><h2>AOF Session</h2><p>實際 {fmt(latest?.actual ?? 0)}BB · All-in EV 估算 {fmt(latest?.allInEv ?? 0)}BB{revealing ? " · 揭牌後更新" : ""}</p><ProfitChart points={view.profits} /><div className="aof-stats"><table><thead><tr><th>玩家</th><th>手數</th><th>盈虧 BB</th><th>推牌率</th><th>跟全押率</th></tr></thead><tbody>{stats.map((s,i) => <tr key={i}><td>{PLAYER_NAMES[i]}</td><td>{s.hands}</td><td>{fmt(s.profit)}</td><td>{s.pushOpportunities ? `${statPercent(s.pushes,s.pushOpportunities)}%` : "—"}</td><td>{s.callOpportunities ? `${statPercent(s.calls,s.callOpportunities)}%` : "—"}</td></tr>)}</tbody></table></div><p>推牌率只計未有人全押嘅機會；跟全押率只計面對全押嘅機會。{standard ? "對手爆倉後補回 8BB；你爆倉後可再買入。" : "每條命爆倉後補回8BB，補碼本身不計盈虧。"}標準桌統計不受影響。</p></section>
   </main>;
 }
 
@@ -1624,7 +1624,7 @@ function ProfitChart({ points }: { points: ProfitPoint[] }) {
   const right = 10;
   const top = 12;
   const bottom = 25;
-  if (!points.length) return <div className="profit-empty"><span>↗</span><b>完成第一手後顯示</b><small>全押牌局會按當時 equity 計算 EV</small></div>;
+  if (!points.length) return <div className="profit-empty"><span>↗</span><b>完成第一手後顯示</b><small>全押 EV 為模擬估算</small></div>;
 
   const plotted = [{ hand: 0, actual: 0, allInEv: 0, hadAllIn: false }, ...points];
   const values = plotted.flatMap(point => [point.actual, point.allInEv, 0]);
@@ -1640,7 +1640,7 @@ function ProfitChart({ points }: { points: ProfitPoint[] }) {
   const ticks = [maxY, (maxY + minY) / 2, minY];
 
   return <div className="profit-chart-wrap">
-    <svg className="profit-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="每手累積實際盈虧及 All-in EV 曲線">
+    <svg className="profit-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="每手累積實際盈虧及 All-in EV 估算曲線">
       {ticks.map((tick, index) => <g key={index}><line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} className="chart-grid" /><text x={left - 6} y={y(tick) + 3} textAnchor="end">{tick >= 0 ? "+" : ""}{tick.toFixed(0)}</text></g>)}
       {minY < 0 && maxY > 0 && <line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="chart-zero" />}
       <polyline points={line("allInEv")} className="curve curve-ev" />
@@ -1652,7 +1652,7 @@ function ProfitChart({ points }: { points: ProfitPoint[] }) {
   </div>;
 }
 
-function buildHandRecord(game: Game, decisions: CoachReview[]): HandRecord {
+function buildHandRecord(game: Game, decisions: CoachReview[], mode: GameMode): HandRecord {
   const result = allInEvDelta(game);
   return {
     id: `${game.tableId}-${game.handNo}`,
@@ -1672,6 +1672,7 @@ function buildHandRecord(game: Game, decisions: CoachReview[]): HandRecord {
     aiDecisions: [...(game.aiDecisions ?? [])],
     actualProfit: result.actualDelta,
     allInEvProfit: result.adjustedDelta,
+    unit: mode === "tournament" ? "籌碼" : "BB",
   };
 }
 
@@ -1891,22 +1892,22 @@ function HandReviewModal({ history, selectedId, replayIndex, studyMode, onStudyM
       {!history.length ? <div className="review-empty"><b>未有已完成牌局</b><p>完成第一手後，完整行動同教練分析會自動保存。</p></div> : <div className="review-layout">
         <aside className="review-list" aria-label="最近100手牌">
           {ordered.map(hand => <div key={hand.id} className={`review-list-row ${selected?.id === hand.id ? "selected" : ""}`}>
-            <button className="review-select" onClick={() => onSelect(hand.id)}><span className="review-hand-no">#{hand.handNo}</span><span className="review-hole">{hand.heroHole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</span><span className={hand.actualProfit >= 0 ? "positive" : "negative"}>{hand.actualProfit >= 0 ? "+" : ""}{fmt(hand.actualProfit)}BB</span><small>{hand.tableSize}-MAX · {new Date(hand.completedAt).toLocaleDateString("zh-HK", { month: "numeric", day: "numeric" })}</small></button>
+            <button className="review-select" onClick={() => onSelect(hand.id)}><span className="review-hand-no">#{hand.handNo}</span><span className="review-hole">{hand.heroHole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</span><span className={hand.actualProfit >= 0 ? "positive" : "negative"}>{hand.actualProfit >= 0 ? "+" : ""}{fmt(hand.actualProfit)} {hand.unit ?? "單位未記錄"}</span><small>{hand.tableSize}-MAX · {new Date(hand.completedAt).toLocaleDateString("zh-HK", { month: "numeric", day: "numeric" })}</small></button>
             <button className={`review-star ${hand.favourite ? "starred" : ""}`} onClick={() => onToggleFavourite(hand.id)} aria-label={hand.favourite ? "取消收藏" : "收藏牌局"}>★</button>
           </div>)}
         </aside>
         {selected && frame && <article className="replayer">
           <div className="replayer-summary"><div><span>第 {selected.handNo} 手 · {selected.tableSize}-MAX</span><strong>{selected.message}</strong></div><button className={selected.favourite ? "starred" : ""} onClick={() => onToggleFavourite(selected.id)}>★ {selected.favourite ? "已收藏" : "收藏"}</button></div>
-          <div className="replay-metrics"><span>實際 <b className={selected.actualProfit >= 0 ? "positive" : "negative"}>{selected.actualProfit >= 0 ? "+" : ""}{fmt(selected.actualProfit)}BB</b></span><span>All-in EV <b>{selected.allInEvProfit >= 0 ? "+" : ""}{fmt(selected.allInEvProfit)}BB</b></span></div>
+          <div className="replay-metrics"><span>實際 <b className={selected.actualProfit >= 0 ? "positive" : "negative"}>{selected.actualProfit >= 0 ? "+" : ""}{fmt(selected.actualProfit)} {selected.unit ?? "單位未記錄"}</b></span><span>All-in EV 估算 <b>{selected.allInEvProfit >= 0 ? "+" : ""}{fmt(selected.allInEvProfit)} {selected.unit ?? "單位未記錄"}</b></span></div>
           <div className="street-jumps">{streetStarts.map(item => <button key={item.street} className={frame.street === item.street ? "active" : ""} onClick={() => onReplay(item.index)}>{STREET_LABEL[item.street]}</button>)}<button className={lastFrame ? "active" : ""} onClick={() => onReplay(selected.frames.length - 1)}>結果</button></div>
           <div className="replay-table">
-            <div className="replay-pot">底池 <b>{fmt(frame.pot)}BB</b></div>
+            <div className="replay-pot">底池 <b>{fmt(frame.pot)} {selected.unit ?? "單位未記錄"}</b></div>
             <div className="replay-board">{[0,1,2,3,4].map(index => <CardView key={index} card={frame.board[index]} mini />)}</div>
             <div className="replay-hero"><span>你嘅底牌</span><div>{selected.heroHole.map((card, index) => <CardView key={index} card={card} mini />)}</div></div>
           </div>
           <div className="replay-action"><span>{STREET_LABEL[frame.street]} · 步驟 {replayIndex + 1}/{selected.frames.length}</span><b>{frame.action}</b></div>
-          <div className={`replay-seats seats-${selected.tableSize}`}>{frame.players.map((player, index) => <div key={player.id} className={`${player.folded ? "folded" : ""} ${frame.actor === index ? "acting" : ""}`}><span>{player.name}</span><b>{fmt(player.stack)}BB</b><small>{player.lastAction || "—"}</small></div>)}</div>
-          {lastFrame && <div className="replay-showdown">{selected.playerHoles.map((hole, index) => index > 0 && (studyMode || !selected.finalFolded[index]) ? <div key={index} className={selected.finalFolded[index] ? "study-mucked" : ""}><b>{PLAYER_NAMES[index]}{selected.finalFolded[index] ? " · 已棄牌" : ""}</b><span>{hole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</span></div> : null)}</div>}
+          <div className={`replay-seats seats-${selected.tableSize}`}>{frame.players.map((player, index) => <div key={player.id} className={`${player.folded ? "folded" : ""} ${frame.actor === index ? "acting" : ""}`}><span>{player.name}</span><b>{fmt(player.stack)} {selected.unit ?? "單位未記錄"}</b><small>{player.lastAction || "—"}</small></div>)}</div>
+          {lastFrame && <div className="replay-showdown">{selected.playerHoles.map((hole, index) => index > 0 && (studyMode || !selected.finalFolded[index]) ? <div key={index} className={selected.finalFolded[index] ? "study-mucked" : ""}><b>{frame.players[index]?.name ?? PLAYER_NAMES[index]}{selected.finalFolded[index] ? " · 已棄牌" : ""}</b><span>{hole.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</span></div> : null)}</div>}
           <div className="replay-nav"><button disabled={replayIndex <= 0} onClick={() => onReplay(Math.max(0, replayIndex - 1))}>← 上一步</button><button disabled={replayIndex >= selected.frames.length - 1} onClick={() => onReplay(Math.min(selected.frames.length - 1, replayIndex + 1))}>下一步 →</button></div>
           <section className="decision-review"><div className="panel-title"><h3>你嘅決定</h3><span>行動紀錄</span></div>{selected.decisions.length ? selected.decisions.map(decision => <div key={decision.id} className="decision-row"><div><span>{STREET_LABEL[decision.street]}</span><b>{decisionActionLabel(decision)}</b></div></div>) : <p className="decision-empty">呢手未有記錄玩家行動。</p>}</section>
           {studyMode && <section className="study-review"><div className="panel-title"><h3>AI決策解釋</h3><span>完手後揭示</span></div>{selected.aiDecisions?.length ? selected.aiDecisions.map(decision => <div className="study-decision" key={decision.id}><div><span>{STREET_LABEL[decision.street]} · {PLAYER_NAMES[decision.actor]}</span><b>{decision.title}</b><p>{decision.detail}</p><small>{decision.range}</small></div><div>{decision.metrics.map(metric => <i key={metric}>{metric}</i>)}</div></div>) : <p className="decision-empty">舊牌局未有AI決策資料；新完成嘅牌局會自動記錄。</p>}</section>}
@@ -2226,7 +2227,7 @@ export default function Home() {
     recordedHand.current = handKey;
     const result = allInEvDelta(game);
     const decisions = coachReviews.filter(review => review.id.startsWith(`${handKey}-`));
-    const record = buildHandRecord(game, decisions);
+    const record = buildHandRecord(game, decisions, gameMode);
     setHandHistory(previous => [record, ...previous.filter(hand => hand.id !== record.id)].slice(0, 100));
     setProfitHistory(previous => {
       const last = previous[previous.length - 1];
@@ -2935,10 +2936,10 @@ export default function Home() {
           <div className="panel-title"><h2>SESSION CURVE</h2><span>{profitHistory.length} 手</span></div>
           <div className="profit-legend">
             <div><i className="legend-actual" /><span>實際盈虧</span><b className={(latestProfit?.actual ?? 0) >= 0 ? "positive" : "negative"}>{(latestProfit?.actual ?? 0) >= 0 ? "+" : ""}{fmt(latestProfit?.actual ?? 0)} {isTournament ? "籌碼" : "BB"}</b></div>
-            <div><i className="legend-ev" /><span>All-in EV</span><b className={(latestProfit?.allInEv ?? 0) >= 0 ? "positive" : "negative"}>{(latestProfit?.allInEv ?? 0) >= 0 ? "+" : ""}{fmt(latestProfit?.allInEv ?? 0)} {isTournament ? "籌碼" : "BB"}</b></div>
+            <div><i className="legend-ev" /><span>All-in EV 估算</span><b className={(latestProfit?.allInEv ?? 0) >= 0 ? "positive" : "negative"}>{(latestProfit?.allInEv ?? 0) >= 0 ? "+" : ""}{fmt(latestProfit?.allInEv ?? 0)} {isTournament ? "籌碼" : "BB"}</b></div>
           </div>
           <ProfitChart points={profitHistory} />
-          <p className="profit-note">All-in EV 只喺全押仍有對手爭池時，按全押一刻嘅勝率調整。</p>
+          <p className="profit-note">All-in EV 係依照全押時仍在牌局中嘅底牌及公共牌，以模擬估算；未計棄牌玩家嘅底牌，結果只供參考。</p>
         </section>
         <section className="hand-library-panel">
           <div className="panel-title"><h2>HAND HISTORY</h2><span>{handHistory.length}/100</span></div>
