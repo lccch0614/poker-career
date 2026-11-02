@@ -388,3 +388,5 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
  .app-shell .table-wrap .controls.tournament-controls > .raise-control { grid-row:4!important; }
  .app-shell .table-wrap .controls.tournament-controls > .hint-action { grid-row:5!important; }
 }
+
+.opponent-note{display:block;margin:10px 0;color:#b8c8be;font-size:12px}.opponent-note span,.opponent-note small{display:block}.opponent-note textarea{display:block;box-sizing:border-box;width:100%;min-height:72px;margin-top:6px;padding:9px;border:1px solid #456758;border-radius:8px;background:#0b1c16;color:#edf7ef;resize:vertical;font:16px/1.4 system-ui,sans-serif}.opponent-note textarea:focus{outline:2px solid #d8af5d;outline-offset:2px}.opponent-note small{text-align:right;margin-top:3px;color:#9aaba2}

@@ -86,7 +86,7 @@ export function statPercent(part: number, total: number) {
 export type OpponentProfile = {
   hands: number; vpipHands: number; pfrHands: number; threeBetHands: number;
   threeBetOpportunities: number; sawFlopHands: number; showdownHands: number;
-  showdownWins: number; lastHandKey: string;
+  showdownWins: number; lastHandKey: string; note: string;
 };
 
 export function restoreOpponentProfiles(value: unknown): Record<string, OpponentProfile> {
@@ -101,17 +101,26 @@ export function restoreOpponentProfiles(value: unknown): Record<string, Opponent
     profiles[key] = { hands: count('hands'), vpipHands: count('vpipHands'), pfrHands: count('pfrHands'),
       threeBetHands: count('threeBetHands'), threeBetOpportunities: count('threeBetOpportunities'),
       sawFlopHands: count('sawFlopHands'), showdownHands: count('showdownHands'), showdownWins: count('showdownWins'),
-      lastHandKey: typeof record.lastHandKey === 'string' ? record.lastHandKey.slice(0, 120) : '' };
+      lastHandKey: typeof record.lastHandKey === 'string' ? record.lastHandKey.slice(0, 120) : '',
+      note: typeof record.note === 'string' ? record.note.slice(0, 160) : '' };
   }
   return profiles;
 }
 
+export function emptyOpponentProfile(): OpponentProfile {
+  return { hands: 0, vpipHands: 0, pfrHands: 0, threeBetHands: 0, threeBetOpportunities: 0, sawFlopHands: 0, showdownHands: 0, showdownWins: 0, lastHandKey: '', note: '' };
+}
+
+export function updateOpponentNote(previous: OpponentProfile | undefined, note: string): OpponentProfile {
+  return { ...(previous ?? emptyOpponentProfile()), note: note.slice(0, 160) };
+}
+
 export function recordOpponentProfile(previous: OpponentProfile | undefined, handKey: string, tracker: PlayerHandTracker, sawShowdown: boolean, wonShowdown: boolean): OpponentProfile {
-  const current = previous ?? { hands: 0, vpipHands: 0, pfrHands: 0, threeBetHands: 0, threeBetOpportunities: 0, sawFlopHands: 0, showdownHands: 0, showdownWins: 0, lastHandKey: '' };
+  const current = previous ?? emptyOpponentProfile();
   if (current.lastHandKey === handKey) return current;
   return { hands: current.hands + 1, vpipHands: current.vpipHands + Number(tracker.vpip),
     pfrHands: current.pfrHands + Number(tracker.pfr), threeBetHands: current.threeBetHands + Number(tracker.threeBet),
     threeBetOpportunities: current.threeBetOpportunities + Number(tracker.threeBetOpportunity),
     sawFlopHands: current.sawFlopHands + Number(tracker.sawFlop), showdownHands: current.showdownHands + Number(sawShowdown),
-    showdownWins: current.showdownWins + Number(sawShowdown && wonShowdown), lastHandKey: handKey };
+    showdownWins: current.showdownWins + Number(sawShowdown && wonShowdown), lastHandKey: handKey, note: current.note ?? "" };
 }
