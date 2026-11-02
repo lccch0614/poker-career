@@ -252,10 +252,18 @@ function awardUncontested(game: Game, winner: number) {
   const amount = potTotal(game);
   const settledBets = game.players.map(player => player.totalBet);
   const players = game.players.map(player => ({ ...player, streetBet: 0, totalBet: 0 }));
+  // The winner receives both the contested pot and any unmatched wager back.
+  // BB ante is dead money and must never be treated as a refundable bet.
+  const liveBets = settledBets.map((bet, index) => bet - (index === game.bb ? game.bigBlindAntePaid ?? 0 : 0));
+  const matched = Math.max(0, ...liveBets.filter((_, index) => index !== winner));
+  const refund = Math.max(0, liveBets[winner] - matched);
+  const won = amount - refund;
+  const unit = game.tournamentFinishes ? " 籌碼" : "BB";
   players[winner].stack += amount;
-  players[winner].lastAction = `贏得 ${fmt(amount)}${game.tournamentFinishes ? " 籌碼" : "BB"}`;
+  players[winner].lastAction = `贏得 ${fmt(won)}${unit}`;
   const tournamentFinishes = game.tournamentFinishes ? recordTournamentFinishes(game.tournamentFinishes, game.startingStacks, players.map(player => player.stack), game.handNo) : undefined;
-  return addLog({ ...game, players, settledBets, tournamentFinishes, pending: players.map(() => false), turn: null, finished: true, winners: [winner], potSummary: [`底池 ${fmt(amount)}${game.tournamentFinishes ? " 籌碼" : "BB"}：${players[winner].name}`] }, `${players[winner].name} 贏得 ${fmt(amount)}${game.tournamentFinishes ? " 籌碼" : "BB"}`);
+  const potSummary = [`底池 ${fmt(won)}${unit}：${players[winner].name}`, ...(refund > 0 ? [`退回未被跟注籌碼 ${fmt(refund)}${unit}：${players[winner].name}`] : [])];
+  return addLog({ ...game, players, settledBets, tournamentFinishes, pending: players.map(() => false), turn: null, finished: true, winners: [winner], potSummary }, `${players[winner].name} 贏得 ${fmt(won)}${unit}`);
 }
 
 function showdown(game: Game, runs = 1): Game {
