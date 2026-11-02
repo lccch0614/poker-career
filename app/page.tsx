@@ -6,7 +6,7 @@ import { icmCallThreshold } from "./icm";
 import { bestScore, buildSidePots, compareScore, completeBoard, type Card, type Suit } from "./poker-engine";
 import { getPreflopAdvice, getTablePosition, positionOpenPercent, type TablePosition } from "./preflop-strategy";
 import { RANGE_POSITIONS, RANGE_RANKS, handsForPosition, positionRangePresets, rangeCell, rangePercent, rangePreset, restoreHandFilter, shouldAutoFold, wasAutoFolded, type HandFilter } from "./hand-filter";
-import { emptyHandTracker, emptySessionStats, settlePlayerSession, statPercent, trackPreflopAction, type PlayerHandTracker, type PlayerSessionStats } from "./session-stats";
+import { emptyHandTracker, emptySessionStats, settlePlayerSession, statPercent, trackPreflopAction, restoreOpponentProfiles, recordOpponentProfile, type OpponentProfile, type PlayerHandTracker, type PlayerSessionStats } from "./session-stats";
 import { TOURNAMENT_BLINDS, TOURNAMENT_SPEEDS, handsUntilBlindUp, payoutShares, potsWithBigBlindAnte, prizeForPlace, recordTournamentFinishes, tournamentBigBlindAnte, tournamentBlinds, tournamentCanContinue, tournamentLevel, tournamentPhase, tournamentStandings, type TournamentFinish, type TournamentSpeed } from "./tournament";
 import { AOF_BIG_BLINDS, CASH_BIG_BLINDS, TOURNAMENT_ENTRIES, aofContinuationStake, buyAofLife, careerStakeRisk, cashCannotRebuy, closeAof, closeCash, newCareerWallet, openAof, openCash, openTournament, rebuyCash, restoreCareerWallet, settleTournament, type CareerWallet, type CareerStakeRisk } from "./career-bankroll";
 import { MTT_BACKGROUND_INTERVAL_MS, MTT_ENTRIES, MTT_LEVEL_MS, MTT_PAID, completeMttBatch, completeMttRound, isMttField, mttAverage, mttClockTick, mttElapsed, mttLevel, mttPayoutShares, mttPrize, mttRemaining, mttStandings, newMttField, rebalanceMttField, restoreMttField, type MttField, type MttHighlight } from "./mtt-field";
@@ -66,6 +66,7 @@ type SavedPokerState = {
   career?: CareerWallet; lobbyCashBb?: number; lobbyTournamentEntry?: number; lobbyAofBb?: number;
   mtt?: MttField; lobbyMtt?: boolean;
   mttSessions?: PlayerSessionStats[];
+  opponentProfiles?: Record<string, OpponentProfile>;
   tournamentClock?: TournamentDecisionClock | null;
 };
 
@@ -1952,6 +1953,7 @@ export default function Home() {
   const [raiseDraft, setRaiseDraft] = useState<string | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("hard");
   const [sessions, setSessions] = useState<PlayerSessionStats[]>(() => PLAYER_NAMES.map(() => emptySessionStats()));
+  const [opponentProfiles, setOpponentProfiles] = useState<Record<string, OpponentProfile>>({});
   const [coachReviews, setCoachReviews] = useState<CoachReview[]>([]);
   const [selectedSeat, setSelectedSeat] = useState(0);
   const [hint, setHint] = useState<GtoHint | null>(null);
@@ -2056,6 +2058,7 @@ export default function Home() {
     setTournamentClock(restoreDecisionClock(saved.tournamentClock));
     setDifficulty(saved.difficulty);
     setSessions(saved.sessions);
+    setOpponentProfiles(restoreOpponentProfiles(saved.opponentProfiles));
     setCoachReviews(saved.coachReviews ?? []);
     setProfitHistory(saved.profitHistory ?? []);
     setHandHistory(saved.handHistory.slice(0, 100));
@@ -2242,6 +2245,17 @@ export default function Home() {
         wonShowdown: sawShowdown && game.winners.includes(index),
       });
     }));
+    // Fixed-name Cash opponents keep a profile across sessions; MTT seats represent different players.
+    if (gameMode === "cash") setOpponentProfiles(previous => {
+      const next = { ...previous };
+      game.players.forEach((player, index) => {
+        if (index === 0 || game.startingStacks[index] <= 0) return;
+        const key = `ai:${index}`;
+        const sawShowdown = game.street === "showdown" && !player.folded;
+        next[key] = recordOpponentProfile(next[key], handKey, game.handTrackers[index], sawShowdown, game.winners.includes(index));
+      });
+      return next;
+    });
     if (mtt && game.mttSeatIds) setMttSessions(previous => {
       const next = previous?.length === MTT_ENTRIES ? [...previous] : Array.from({ length: MTT_ENTRIES }, () => emptySessionStats());
       game.mttSeatIds!.forEach((id, index) => {
@@ -2253,7 +2267,7 @@ export default function Home() {
       });
       return next;
     });
-  }, [restoreReady, started, game, coachReviews, mtt]);
+  }, [restoreReady, started, game, gameMode, coachReviews, mtt]);
 
   useEffect(() => {
     if (!restoreReady || !persistenceReady) return;
@@ -2279,6 +2293,7 @@ export default function Home() {
       tournamentClock,
       difficulty,
       sessions,
+      opponentProfiles,
       coachReviews,
       profitHistory,
       handHistory: handHistory.slice(0, 100),
@@ -2335,7 +2350,7 @@ export default function Home() {
     const onPageHide = () => { window.clearTimeout(timer); void flush(true); };
     window.addEventListener("pagehide", onPageHide);
     return () => { window.clearTimeout(timer); window.removeEventListener("pagehide", onPageHide); };
-  }, [restoreReady, persistenceReady, game, started, hasActiveTable, gameMode, lobbyGameMode, tournamentSpeed, lobbyTournamentSpeed, career, lobbyCashBb, lobbyTournamentEntry, lobbyAofBb, lobbySize, lobbyMtt, mtt, mttSessions, tournamentClock, difficulty, sessions, coachReviews, profitHistory, handHistory, studyMode, handFilter, aof, aofOpen, saveConflict]);
+  }, [restoreReady, persistenceReady, game, started, hasActiveTable, gameMode, lobbyGameMode, tournamentSpeed, lobbyTournamentSpeed, career, lobbyCashBb, lobbyTournamentEntry, lobbyAofBb, lobbySize, lobbyMtt, mtt, mttSessions, tournamentClock, difficulty, sessions, opponentProfiles, coachReviews, profitHistory, handHistory, studyMode, handFilter, aof, aofOpen, saveConflict]);
 
   const heroHand = useMemo(() => game.board.length >= 3 ? HAND_LABEL[bestScore([...hero.hole, ...game.board])[0]] : "", [hero.hole, game.board]);
   const isTournament = gameMode === "tournament";
@@ -2611,6 +2626,7 @@ export default function Home() {
 
   const session = sessions[0];
   const selectedStats = sessions[selectedSeat];
+  const selectedCareerProfile = !isTournament && selectedSeat > 0 ? opponentProfiles[`ai:${selectedSeat}`] : undefined;
   const percent = (part: number, total = selectedStats.hands) => statPercent(part, total);
   const coachScore = session.decisions ? Math.round(session.coachPoints / session.decisions) : 0;
   const coachLetter = coachScore >= 90 ? "A" : coachScore >= 80 ? "B" : coachScore >= 68 ? "C" : coachScore >= 55 ? "D" : session.decisions ? "F" : "—";
@@ -2896,6 +2912,7 @@ export default function Home() {
         <section className="session-panel">
           <div className="panel-title"><h2>SESSION · {PLAYER_NAMES[selectedSeat]}</h2><button onClick={() => { setSessions(PLAYER_NAMES.slice(0, tableSize).map(() => emptySessionStats())); setCoachReviews([]); setProfitHistory([]); }}>全部重設</button></div>
           {selectedSeat !== 0 && <div className="ai-profile"><div className="ai-profile-mark">{selectedSeat}</div><div><small>對手傾向</small><b>{selectedProfile}</b><span>{selectedStats.hands} 手樣本 · 建議至少 20 手</span></div></div>}
+          {selectedSeat !== 0 && !isTournament && <div className="coach-card opponent-card" aria-label="對手長期觀察"><span>長期觀察 · 跨 Cash 牌桌</span><p>{selectedCareerProfile ? `${selectedCareerProfile.hands} 手 · VPIP ${statPercent(selectedCareerProfile.vpipHands, selectedCareerProfile.hands)}% · PFR ${statPercent(selectedCareerProfile.pfrHands, selectedCareerProfile.hands)}% · 3-bet ${statPercent(selectedCareerProfile.threeBetHands, selectedCareerProfile.threeBetOpportunities)}%` : "由本次更新後開始記錄；樣本愈多，參考價值愈高。"}</p></div>}
           <div className="stats-grid">
             <div><span>手數</span><b>{selectedStats.hands}</b></div><div><span>盈虧</span><b className={selectedStats.profit >= 0 ? "positive" : "negative"}>{selectedStats.profit >= 0 ? "+" : ""}{fmt(selectedStats.profit)} {isTournament ? "籌碼" : "BB"}</b></div>
             <div><span>VPIP</span><b>{percent(selectedStats.vpipHands)}%</b></div><div><span>PFR</span><b>{percent(selectedStats.pfrHands)}%</b></div>
