@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -216,3 +216,16 @@ const hiddenHtml = renderToStaticMarkup(React.createElement(HandReviewModal, unc
 assert.ok(!hiddenHtml.includes('class="replay-showdown"><div'));
 const studyHtml = renderToStaticMarkup(React.createElement(HandReviewModal, { ...uncontestedProps, studyMode: true }));
 assert.ok(studyHtml.includes('class="replay-showdown"><div'));
+
+// Fractional stacks from split pots must remain exact when either player jams.
+assert.equal(raiseAmount(10.1, 2, 10.1), 10.1);
+assert.equal(raiseAmount(10.3, 2, 10.1), 10.1);
+assert.equal(raiseAmount(8.1, 2, 10.1), 8);
+for (const stack of [10.1, 10.2, 10.3, 10.4]) {
+  let fractional = newHand([stack, 20], 0, 220, () => .41);
+  fractional = act(fractional, 0, 'raise', stack);
+  assert.ok(Math.abs(fractional.players[0].stack) < 1e-9);
+  assert.equal(fractional.players[0].allIn, true);
+  assert.ok(Math.abs(fractional.players[0].totalBet - stack) < 1e-9);
+  assert.ok(Math.abs(fractional.players.reduce((sum, p) => sum + p.stack + p.totalBet, 0) - stack - 20) < 1e-9);
+}
