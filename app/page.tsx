@@ -329,27 +329,52 @@ function shouldPlayStandardCinematic(before: Game, after: Game) {
   const contenders = after.players.map((p, i) => !p.folded ? i : -1).filter(i => i >= 0);
   const bb = after.bigBlind ?? 1;
   return !before.finished && after.finished && before.tableId === after.tableId && before.handNo === after.handNo
-    && after.street === "showdown" && before.board.length < 5 && after.board.length === 5
+    && !after.players[0].folded && after.street === "showdown" && before.board.length < 5 && after.board.length === 5
     && (after.runoutBoards?.length ?? 1) === 1 && contenders.length >= 2
     && !!after.showdownAwards?.length
     && after.players.some(p => !p.folded && p.allIn)
     && after.settledBets.reduce((sum, amount) => sum + amount, 0) >= 40 * bb;
 }
 
-function StandardShowdown({ presentation, fast, onClose }: { presentation: StandardCinematic; fast: boolean; onClose: () => void }) {
+// Revealing affects presentation only; the card and settlement are already fixed.
+function RiverSqueeze({ card, mini = false, onReveal }: { card: Card; mini?: boolean; onReveal: () => void }) {
+  const [progress, setProgress] = useState(0);
+  const pointer = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  return <button type="button" className={`river-squeeze ${mini ? "river-squeeze-mini" : ""}`} aria-label="揭開 River，拖動或點按" onPointerDown={event => {
+    pointer.current = { x: event.clientX, y: event.clientY, moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }} onPointerMove={event => {
+    const start = pointer.current;
+    if (!start) return;
+    const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+    if (distance > 5) start.moved = true;
+    setProgress(Math.min(1, distance / Math.max(48, event.currentTarget.getBoundingClientRect().width)));
+  }} onPointerUp={event => {
+    const start = pointer.current;
+    if (!start) return;
+    const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+    pointer.current = null;
+    if (!start.moved || distance >= Math.max(48, event.currentTarget.getBoundingClientRect().width) * .75) onReveal();
+    else setProgress(0);
+  }} onPointerCancel={() => { pointer.current = null; setProgress(0); }} onClick={event => { if (event.detail === 0) onReveal(); }}>
+    <span className="river-squeeze-face" aria-hidden="true" style={{ clipPath: `inset(0 ${100 - progress * 100}% 0 0)` }}><CardView card={card} mini={mini} /></span>
+    <span className="river-squeeze-cover" aria-hidden="true" style={{ clipPath: `inset(0 0 0 ${progress * 100}%)` }}>♠</span>
+  </button>;
+}
+
+function StandardShowdown({ presentation, fast, squeezeEnabled, onClose }: { presentation: StandardCinematic; fast: boolean; squeezeEnabled: boolean; onClose: () => void }) {
   const { game, startBoard } = presentation;
   const contenders = game.players.map((p, i) => !p.folded ? i : -1).filter(i => i >= 0);
   const lengths = [startBoard.length, 3, 4, 5].filter((n, i, all) => n >= startBoard.length && all.indexOf(n) === i);
   const awards = game.showdownAwards ?? [];
   const [step, setStep] = useState(0);
   const [revealed, setRevealed] = useState<number[]>([]);
-  const [manualReveal, setManualReveal] = useState(true);
-  const pointerStart = useRef<{ x: number; y: number } | null>(null);
+  const [manualReveal, setManualReveal] = useState(squeezeEnabled);
   const result = step >= lengths.length;
   const awardIndex = result ? Math.min(step - lengths.length, awards.length - 1) : -1;
   const award = result ? awards[awardIndex] : undefined;
   const stageCount = result ? 5 : lengths[step];
-  const covered = manualReveal && !result && step > 0 && stageCount >= 4 && !revealed.includes(stageCount);
+  const covered = manualReveal && !result && step > 0 && stageCount === 5 && !revealed.includes(stageCount);
   const count = covered ? stageCount - 1 : stageCount;
   const board = game.board.slice(0, count);
   const holes = contenders.map(i => game.players[i].hole);
@@ -365,15 +390,15 @@ function StandardShowdown({ presentation, fast, onClose }: { presentation: Stand
   const awardName = award ? award.refund ? "退回未被跟注籌碼" : award.layer === 0 ? "主池" : `邊池 ${award.layer}` : "";
   return <div className="standard-cinema-overlay" role="dialog" aria-modal="true" aria-label="重要底池攤牌">
     <section className={`standard-cinema ${result ? "standard-cinema-result" : ""}`}>
-      <header><span>ALL-IN SHOWDOWN</span><strong>{result ? "逐池結算" : covered ? `揭開 ${stageCount === 4 ? "TURN" : "RIVER"}` : count === 0 ? "全押對決" : count === 3 ? "FLOP · 翻牌" : count === 4 ? "TURN · 轉牌" : "RIVER · 河牌"}</strong><small>底池 {fmt(game.settledBets.reduce((a,b) => a+b,0))} {game.tournamentFinishes ? "籌碼" : "BB"}</small></header>
+      <header><span>ALL-IN SHOWDOWN</span><strong>{result ? "逐池結算" : covered ? "揭開 RIVER" : count === 0 ? "全押對決" : count === 3 ? "FLOP · 翻牌" : count === 4 ? "TURN · 轉牌" : "RIVER · 河牌"}</strong><small>底池 {fmt(game.settledBets.reduce((a,b) => a+b,0))} {game.tournamentFinishes ? "籌碼" : "BB"}</small></header>
       {moment && <div className="standard-cinema-moment" key={`${count}-${moment.title}`} role="status"><b>{moment.title}</b><span>{moment.detail}</span></div>}
       <div className="standard-cinema-players">{contenders.map((index, i) => <div className={`standard-cinema-player ${award && !award.refund && award.winners.includes(index) ? "winner" : ""}`} key={index}>
         <div><strong>{game.players[index].name}</strong>{award && !award.refund && award.winners.includes(index) && <b>勝出 ✦</b>}</div><div className="standard-cinema-holes">{game.players[index].hole.map((card, j) => <CardView key={j} card={card} mini />)}</div>
         <div className="standard-cinema-equity"><i><span style={{width:`${equities[i] * 100}%`}} /></i><b>{(equities[i] * 100).toFixed(1)}%</b></div>
         {award?.winners.includes(index) && <div className="standard-cinema-award" key={`${awardIndex}-${index}`}><i>●</i><i>●</i><i>●</i><strong>{award.refund ? "退回" : "收池"} +{fmt(award.share)}</strong></div>}
       </div>)}</div>
-      <div className="standard-cinema-board">{[0,1,2,3,4].map(i => covered && i === stageCount-1 ? <button key={`covered-${i}`} type="button" className="standard-squeeze" aria-label={`揭開${stageCount === 4 ? "轉牌" : "河牌"}，可拖動或點按`} onPointerDown={event => {pointerStart.current = {x:event.clientX,y:event.clientY}; event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event => {const start = pointerStart.current; pointerStart.current = null; if (start && Math.hypot(event.clientX-start.x,event.clientY-start.y) > 20) revealCard();}} onPointerCancel={() => {pointerStart.current = null;}} onClick={revealCard}><span>♠</span><small>揭牌</small></button> : <div key={`${i}-${i<count}`} className={i<count && i>=startBoard.length ? "standard-cinema-flip" : ""}><CardView card={board[i]} /></div>)}</div>
-      {covered && <p className="standard-squeeze-hint" role="status">拖動或點按牌背揭開{stageCount === 4 ? "轉牌" : "河牌"}</p>}
+      <div className="standard-cinema-board">{[0,1,2,3,4].map(i => covered && i === 4 ? <RiverSqueeze key="river" card={game.board[4]} onReveal={revealCard} /> : <div key={`${i}-${i<count}`} className={i<count && i>=startBoard.length ? "standard-cinema-flip" : ""}><CardView card={board[i]} /></div>)}</div>
+      {covered && <p className="standard-squeeze-hint" role="status">拖動或點按牌背揭開河牌</p>}
       {award && <div className="standard-pot-result" key={`pot-${awardIndex}`} role="status"><b>{awardName} · {fmt(award.amount)}</b><span>{award.winners.map(index => game.players[index].name).join("、")} {award.refund ? "獲退回" : award.winners.length > 1 ? "平分" : "收池"} · 每人 {fmt(award.share)}</span></div>}
       <p>{result ? "依照實際主池、邊池及退回金額逐項顯示。" : "顯示所有已亮底牌嘅估算攤牌權益；平分計入。邊池資格不同，實際派彩以逐池結算為準。"}</p>
       <div className="standard-cinema-actions">{!result && <button type="button" className="standard-reveal-mode" onClick={() => setManualReveal(value => !value)}>{manualReveal ? "切換自動揭牌" : "切換觸控揭牌"}</button>}<button type="button" onClick={onClose}>{result ? "查看結果" : "跳過動畫"}</button></div>
@@ -1438,14 +1463,19 @@ function aofWhatIfBoard(game: Game) {
   return completeBoard(game.deck,game.board).board;
 }
 
-function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalance = 0, careerStake = 1, bankrollMessage = "", legacy = false, runInvested = 0, runReturned = 0, walletOpen = false }: { state: AofState; onChange: (state: AofState) => void; onExit: () => void; onCashOut?: () => void; saveStatus: string; careerBalance?: number; careerStake?: number; bankrollMessage?: string; legacy?: boolean; runInvested?: number; runReturned?: number; walletOpen?: boolean }) {
+function shouldPlayAofCinematic(game: Game) {
+  return game.finished && !game.players[0].folded && game.board.length === 5 && game.players.filter(p => !p.folded).length >= 2 && game.settledBets.reduce((sum, bet) => sum + bet, 0) >= 12;
+}
+
+function AofTable({ state, onChange, onExit, onCashOut, saveStatus, squeezeEnabled, onToggleSqueeze, careerBalance = 0, careerStake = 1, bankrollMessage = "", legacy = false, runInvested = 0, runReturned = 0, walletOpen = false }: { state: AofState; squeezeEnabled: boolean; onToggleSqueeze: () => void; onChange: (state: AofState) => void; onExit: () => void; onCashOut?: () => void; saveStatus: string; careerBalance?: number; careerStake?: number; bankrollMessage?: string; legacy?: boolean; runInvested?: number; runReturned?: number; walletOpen?: boolean }) {
   const { game } = state;
   const standard = state.variant === "standard";
   const view = aofPresentation(state);
   const { stats, revealing, step, lives } = view;
   const paid = game.finished && !revealing;
   // A full cinematic is reserved for contested pots of at least 12 BB.
-  const cinematic = game.finished && game.board.length === 5 && game.players.filter(p => !p.folded).length >= 2 && game.settledBets.reduce((sum, bet) => sum + bet, 0) >= 12;
+  const cinematic = shouldPlayAofCinematic(game);
+  const squeezePending = cinematic && revealing && step === 3 && squeezeEnabled;
   const boss = aofBoss(state);
   const [hint, setHint] = useState(false);
   const [fast, setFast] = useState(false);
@@ -1472,11 +1502,11 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
     return () => window.clearTimeout(timer);
   }, [state, game, onChange]);
   useEffect(() => {
-    if (!revealing) return;
+    if (!revealing || (squeezePending && !reduced)) return;
     const duration = reduced ? 60 : cinematic ? (fast ? .42 : 1) * [850,1300,1800,2300,1700][step] : (fast ? 120 : 250);
     const timer = window.setTimeout(() => onChange({ ...state, revealStep: reduced ? 5 : step+1 }), duration);
     return () => window.clearTimeout(timer);
-  }, [state, revealing, step, fast, reduced, cinematic, onChange]);
+  }, [state, revealing, step, fast, reduced, cinematic, squeezePending, onChange]);
   useEffect(() => {
     const ctx = audioRef.current;
     if (!sound || !ctx || ctx.state !== "running" || !game.finished) return;
@@ -1535,6 +1565,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
     [game.handNo,exposed,equities,view.board.length]);
   const moment = useMemo(() => exposed && view.board.length >= 3 ? aofMoment(contenders.map(i => game.players[i].hole),view.board,contenders.map(i => game.players[i].name)) : null,
     [game.handNo,exposed,view.board.length]);
+  const visibleHighlights = (state.highlights ?? []).filter(item => !revealing || item.hand !== game.handNo);
   const xp = state.xp ?? 0;
   const unlocked = state.unlockedThemes ?? aofUnlocked(xp);
   const theme: AofTheme = unlocked.includes(state.theme ?? "emerald") ? state.theme ?? "emerald" : "emerald";
@@ -1561,6 +1592,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
     <details className="aof-settings"><summary>動畫、音效及重新開始</summary><div className="aof-playback" aria-label="AOF動畫設定">
       <button aria-pressed={!fast} onClick={() => setFast(false)}>電影節奏</button><button aria-pressed={fast} onClick={() => setFast(true)}>快速</button>
       <button aria-pressed={reduced} onClick={() => setReduced(!reduced)}>減少動態 {reduced ? "ON" : "OFF"}</button>
+      <button type="button" aria-pressed={squeezeEnabled} onClick={onToggleSqueeze}>River 觸控揭牌 {squeezeEnabled ? "ON" : "OFF"}</button>
       <button aria-pressed={sound} onClick={toggleSound}>音效 {sound ? "ON" : "OFF"}</button>
       <button className="aof-restart" onClick={restartRun} disabled={!game.finished || revealing}>重新開始 ↻</button>
     </div></details>
@@ -1578,19 +1610,19 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
           return <div key={`${game.handNo}-${i}-${faceUp}-${foldReveal}`} className={`${faceUp && index !== 0 && (exposed || foldReveal) ? "aof-flip" : ""} ${winners.includes(index) && winningKeys.has(cardKey(card)) ? "aof-card-used" : ""}`}><CardView card={card} mini hidden={!faceUp} /></div>;
         })}</div>
         <small>{p.lastAction}</small>
-        {exposed && !p.folded && equities.length > 0 && <span className="aof-equity">{view.board.length < 4 ? "約 " : ""}{(equities[contenders.indexOf(index)]*100).toFixed(1)}% <small>底池權益</small></span>}
-        {outs[contenders.indexOf(index)]?.behind && <span className="aof-outs-badge">{outs[contenders.indexOf(index)].win.length} 反超 outs · {outs[contenders.indexOf(index)].tie.length} 追平</span>}
+        {cinematic && exposed && !p.folded && equities.length > 0 && <span className="aof-equity">{view.board.length < 4 ? "約 " : ""}{(equities[contenders.indexOf(index)]*100).toFixed(1)}% <small>底池權益</small></span>}
+        {cinematic && outs[contenders.indexOf(index)]?.behind && <span className="aof-outs-badge">{outs[contenders.indexOf(index)].win.length} 反超 outs · {outs[contenders.indexOf(index)].tie.length} 追平</span>}
         {revealing && step === 1 && !p.folded && <span className="aof-chip-travel">{fmt(game.settledBets[index] ?? 0)}BB</span>}
         {paid && cinematic && !reduced && winners.includes(index) && <span className="aof-award-flight" key={`award-${game.handNo}-${index}`} aria-hidden="true"><i /><i /><i /></span>}
         {winners.includes(index) && <span className="aof-payout">收池 +{fmt(game.showdownAwards ? game.showdownAwards.filter(award => !award.refund && award.winners.includes(index)).reduce((sum, award) => sum + award.share, 0) : p.stack-(game.startingStacks[index]-game.settledBets[index]))}BB</span>}
       </div>)}
-      <div className="aof-centre"><b>{foldReveal ? "娛樂揭牌" : paid ? "本手結束" : `底池 ${fmt(view.pot)}BB`}</b><div className="aof-board">{[0,1,2,3,4].map(i => <div key={`${game.handNo}-${i}-${!!displayBoard[i]}-${foldReveal}`} className={`${displayBoard[i] ? "aof-flip" : ""} ${paid && !foldReveal && displayBoard[i] && winningKeys.has(cardKey(displayBoard[i])) ? "aof-card-used" : ""}`}><CardView card={displayBoard[i]} mini /></div>)}</div><span>{foldReveal ? "假設牌面 · 不計入結果" : revealing ? stageLabel : `第 ${game.handNo} 手`}</span></div>
+      <div className="aof-centre"><b>{foldReveal ? "娛樂揭牌" : paid ? "本手結束" : `底池 ${fmt(view.pot)}BB`}</b><div className="aof-board">{[0,1,2,3,4].map(i => <div key={`${game.handNo}-${i}-${!!displayBoard[i]}-${foldReveal}`} className={`${displayBoard[i] ? "aof-flip" : ""} ${paid && !foldReveal && displayBoard[i] && winningKeys.has(cardKey(displayBoard[i])) ? "aof-card-used" : ""}`}>{squeezePending && !reduced && i === 4 ? <RiverSqueeze card={game.board[4]} mini onReveal={() => onChange({ ...state, revealStep: 4 })} /> : <CardView card={displayBoard[i]} mini />}</div>)}</div><span>{foldReveal ? "假設牌面 · 不計入結果" : revealing ? stageLabel : `第 ${game.handNo} 手`}</span></div>
     </section>
     {cinematic && exposed && equities.length > 1 && <section className="aof-equity-bars" aria-label="攤牌即時底池權益"><div><strong>底池權益</strong><small>{view.board.length < 4 ? "模擬估算" : "完整枚舉"} · 平分計入</small></div>{contenders.map((index, i) => <div className="aof-equity-row" key={index}><span>{game.players[index].name}</span><div className="aof-equity-track"><i style={{ width: `${Math.max(0, Math.min(100, equities[i] * 100))}%`, "--equity-color": ["#e7bd6c", "#77d8c2", "#8da9eb", "#df8e94"][i % 4] } as React.CSSProperties} /></div><b>{(equities[i] * 100).toFixed(1)}%</b></div>)}<p>按已亮底牌及目前公用牌計算；邊池實際分配可有不同。</p></section>}
     {outs.some(o => o.behind) && <section className="aof-outs-panel" aria-label="落後玩家的outs"><h2>{view.board.length === 3 ? "等 Turn" : "等 River"} · 落後方 OUTS</h2>{outs.map((o,i) => o.behind ? <div className="aof-outs-row" key={contenders[i]}><strong>{PLAYER_NAMES[contenders[i]]} · 反超 {o.win.length} 張／追平 {o.tie.length} 張</strong>{o.win.length > 0 && <div><b>反超</b>{o.win.map(c => <span className={c.suit === "h" || c.suit === "d" ? "red" : ""} key={cardKey(c)}>{RANK_LABEL[c.rank] ?? c.rank}{SUIT_GLYPH[c.suit]}</span>)}</div>}{o.tie.length > 0 && <div><b>追平</b>{o.tie.map(c => <span className={c.suit === "h" || c.suit === "d" ? "red" : ""} key={cardKey(c)}>{RANK_LABEL[c.rank] ?? c.rank}{SUIT_GLYPH[c.suit]}</span>)}</div>}{o.win.length+o.tie.length === 0 && <p>{view.board.length === 3 ? "下一張未能直接反超或追平；仍可能靠兩張連續好牌逆轉。" : "已無反超或追平嘅 River 牌。"}</p>}</div> : null)}<p>按目前牌型判定落後；列出下一張能超越全部對手或並列第一嘅牌。{view.board.length === 3 ? "Flop outs只代表Turn暫時領先，River仍可能被反超；不包括兩張連續好牌嘅組合。" : "Turn outs代表River最終結果。"}未揭底牌視為未知。</p></section>}
     {foldReveal && <p className="aof-fold-note">娛樂揭牌顯示收池 AI 嘅底牌及同一副牌嘅假設 runout；正式牌局已於你棄牌時完結，牌面不影響盈虧、命數或統計。</p>}
     <p className="aof-message" aria-live="polite">{revealing ? `${stageLabel} · 等待揭牌…` : foldReveal ? `${PLAYER_NAMES[game.winners[0]]} 亮牌 · 睇下如果繼續會發生咩事` : paid ? game.message : game.turn === 0 ? "輪到你：全押或棄牌" : `${game.players[game.turn ?? 0].name} 正在思考…`}</p>
-    {revealing ? <div className="aof-actions"><button onClick={() => onChange({ ...state, revealStep: 5 })}>跳過動畫 · 顯示結果</button></div>
+    {revealing ? <div className="aof-actions">{squeezePending && !reduced && <button onClick={() => onChange({ ...state, revealStep: 4 })}>自動揭開 River</button>}<button onClick={() => onChange({ ...state, revealStep: 5 })}>跳過動畫 · 顯示結果</button></div>
       : paid && state.runFinished ? <div className="aof-actions"><button className="aof-jam" onClick={next}>{standard ? "重新買入 8BB · 開新局" : state.bossLastResult === "complete" ? "完成 Boss Run · 返回三命 Run" : state.bossActive && state.bossLastResult === "win" ? "下一關 · 回復三條命" : state.bossActive ? "重試本關 · 回復三條命" : `開始第 ${(state.runNo ?? 1)+1} 局 · 回復三條命`}</button></div>
       : paid && foldEligible && !foldReveal ? <div className="aof-actions"><button onClick={() => onChange({ ...state, foldReveal: true })}>✦ 娛樂揭牌</button><button className="aof-jam" onClick={next}>{nextLifeNeeded && !legacy ? careerBalance >= nextLifeCost ? `補命 ${fmt(nextLifeCost)} C · 下一手` : "餘額不足 · 結束 Run" : "下一手 · 籌碼延續"}</button></div>
       : paid ? <div className="aof-actions"><button className="aof-jam" onClick={next}>{nextLifeNeeded && !legacy ? careerBalance >= nextLifeCost ? `補命 ${fmt(nextLifeCost)} C · 下一手` : "餘額不足 · 結束 Run" : "下一手 · 籌碼延續"}</button></div>
@@ -1615,7 +1647,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, careerBalanc
       </div>{selectedHand && <div className="aof-collection-detail"><b>{selectedHand}</b><span>{selectedEntry ? `獲發 ${selectedEntry.dealt} 次 · 勝出 ${selectedEntry.wins} 次 · 勝率 ${Math.round(selectedEntry.wins/selectedEntry.dealt*100)}%` : "尚未獲發呢款起手牌"}</span></div>}<p>對角線係口袋對子；右上為同花，左下為非同花。每次真正獲發即永久收錄，Fold 亦會保留。</p></>}
     </section>
     <section className="aof-panel aof-rewards"><div className="aof-reward-head"><div><span>外觀獎勵</span><h2>娛樂等級 {Math.floor(xp/25)+1}</h2></div><strong>{xp} XP</strong></div><div className="aof-xp-track"><i style={{ width: `${rewardProgress}%` }} /></div><p>{nextTheme ? `再取得 ${nextTheme.unlock-xp} XP 解鎖「${nextTheme.label}」` : "所有牌桌主題已解鎖"}</p><div className="aof-theme-picker">{AOF_THEMES.map(item => { const available = unlocked.includes(item.id); return <button key={item.id} disabled={!available} aria-pressed={theme === item.id} onClick={() => available && onChange({ ...state, theme: item.id })}>{available ? item.label : `${item.unlock} XP`}</button>; })}</div></section>
-    <section className="aof-panel aof-highlights"><div className="aof-reward-head"><div><span>SESSION REEL</span><h2>牌局精華</h2></div><strong>{(state.highlights ?? []).length}</strong></div>{(state.highlights ?? []).length ? <div>{(state.highlights ?? []).slice(0,6).map(item => <article className={item.tone} key={item.id}><b>#{item.hand}</b><span><strong>{item.title}</strong><small>{item.detail}</small></span></article>)}</div> : <p>完成牌局後，反勝、多人 All-in、罕見牌型及出局時刻會自動收錄。</p>}</section>
+    <section className="aof-panel aof-highlights"><div className="aof-reward-head"><div><span>SESSION REEL</span><h2>牌局精華</h2></div><strong>{visibleHighlights.length}</strong></div>{visibleHighlights.length ? <div>{visibleHighlights.slice(0,6).map(item => <article className={item.tone} key={item.id}><b>#{item.hand}</b><span><strong>{item.title}</strong><small>{item.detail}</small></span></article>)}</div> : <p>完成牌局後，反勝、多人 All-in、罕見牌型及出局時刻會自動收錄。</p>}</section>
     <section className="aof-panel"><h2>AOF Session</h2><p>實際 {fmt(latest?.actual ?? 0)}BB · All-in EV 估算 {fmt(latest?.allInEv ?? 0)}BB{revealing ? " · 揭牌後更新" : ""}</p><ProfitChart points={view.profits} /><div className="aof-stats"><table><thead><tr><th>玩家</th><th>手數</th><th>盈虧 BB</th><th>推牌率</th><th>跟全押率</th></tr></thead><tbody>{stats.map((s,i) => <tr key={i}><td>{PLAYER_NAMES[i]}</td><td>{s.hands}</td><td>{fmt(s.profit)}</td><td>{s.pushOpportunities ? `${statPercent(s.pushes,s.pushOpportunities)}%` : "—"}</td><td>{s.callOpportunities ? `${statPercent(s.calls,s.callOpportunities)}%` : "—"}</td></tr>)}</tbody></table></div><p>推牌率只計未有人全押嘅機會；跟全押率只計面對全押嘅機會。{standard ? "對手爆倉後補回 8BB；你爆倉後可再買入。" : "每條命爆倉後補回8BB，補碼本身不計盈虧。"}標準桌統計不受影響。</p></section>
   </main>;
 }
@@ -2027,6 +2059,7 @@ export default function Home() {
   const [tableMotion, setTableMotion] = useState<StandardTableMotion | null>(null);
   const [dealMotion, setDealMotion] = useState<{ id: number; tableId: string; handNo: number; seats: number[] } | null>(null);
   const [motionMode, setMotionMode] = useState<"normal" | "fast" | "off">("normal");
+  const [riverSqueeze, setRiverSqueeze] = useState(false);
   const [quickFold, setQuickFold] = useState(false);
   const [queuedFoldHand, setQueuedFoldHand] = useState<string | null>(null);
   const queuedFoldKey = `${game.tableId}-${game.handNo}`;
@@ -2035,11 +2068,17 @@ export default function Home() {
   const [standardCinematic, setStandardCinematic] = useState<StandardCinematic | null>(null);
   const motionSerial = useRef(0);
   useEffect(() => {
+    try { setRiverSqueeze(window.localStorage.getItem("poker-river-squeeze") === "yes"); } catch { /* Use the default if storage is unavailable. */ }
     const saved = window.localStorage.getItem("poker-standard-motion");
     if (saved === "normal" || saved === "fast" || saved === "off") setMotionMode(saved);
     setAutoResume(window.localStorage.getItem("poker-auto-resume") === "yes");
     setQuickFold(window.localStorage.getItem("poker-quick-fold") === "yes");
   }, []);
+  const toggleRiverSqueeze = () => setRiverSqueeze(value => {
+    const next = !value;
+    try { window.localStorage.setItem("poker-river-squeeze", next ? "yes" : "no"); } catch { /* Keep this preference for the session. */ }
+    return next;
+  });
   const changeMotionMode = (mode: "normal" | "fast" | "off") => {
     setMotionMode(mode);
     window.localStorage.setItem("poker-standard-motion", mode);
@@ -2811,7 +2850,7 @@ export default function Home() {
       commitCareer(closed); aofRef.current = ended; setAof(ended);
       setBankrollMessage(`已兌回 ${fmt(current.game.players[0].stack * (career.aof?.bb ?? lobbyAofBb))} C 至 Bankroll。`);
     };
-    return <AofTable state={aof} onChange={applyAofState} onExit={() => { setAofOpen(false); setEntryView("home"); }} onCashOut={cashOutAof} saveStatus={saveStatusLabel} careerBalance={career.balance} careerStake={firstLife ? -firstLife.amount / 8 : lobbyAofBb} bankrollMessage={bankrollMessage} legacy={!firstLife} runInvested={runInvested} runReturned={runReturned} walletOpen={walletOpen} />;
+    return <AofTable squeezeEnabled={riverSqueeze} onToggleSqueeze={toggleRiverSqueeze} state={aof} onChange={applyAofState} onExit={() => { setAofOpen(false); setEntryView("home"); }} onCashOut={cashOutAof} saveStatus={saveStatusLabel} careerBalance={career.balance} careerStake={firstLife ? -firstLife.amount / 8 : lobbyAofBb} bankrollMessage={bankrollMessage} legacy={!firstLife} runInvested={runInvested} runReturned={runReturned} walletOpen={walletOpen} />;
   }
 
   if (entryView === "home") return <><main className="mode-home-shell"><section className="mode-home" aria-labelledby="mode-home-title">
@@ -2892,7 +2931,7 @@ export default function Home() {
     </section>
   </main>{reviewModal}{leakModal}{scenarioModal}{mttHighlightsModal}{tournamentInfoModal}</>;
 
-  return <>{standardCinematic && <StandardShowdown key={`${standardCinematic.game.tableId}-${standardCinematic.game.handNo}`} presentation={standardCinematic} fast={motionMode === "fast"} onClose={() => setStandardCinematic(null)} />}{game.runoutPending && <AllInChoice game={game} onChoose={requested => setGame(previous => {
+  return <>{standardCinematic && <StandardShowdown key={`${standardCinematic.game.tableId}-${standardCinematic.game.handNo}`} presentation={standardCinematic} fast={motionMode === "fast"} squeezeEnabled={riverSqueeze} onClose={() => setStandardCinematic(null)} />}{game.runoutPending && <AllInChoice game={game} onChoose={requested => setGame(previous => {
     if (!previous.runoutPending) return previous;
     const choices = previous.players.map((player, index) => index && !player.folded ? { index, count: 1 + ((index + previous.handNo - 1) % 3) } : null).filter((choice): choice is { index: number; count: number } => choice !== null);
     const runs = Math.min(requested, ...choices.map(choice => choice.count));
@@ -2914,7 +2953,7 @@ export default function Home() {
         </div>
         <div className="training-switch">{!isTournament && <button type="button" aria-pressed={quickFold} className={quickFold ? "active" : ""} onClick={() => { const next = !quickFold; setQuickFold(next); if (!next) setQueuedFoldHand(null); try { window.localStorage.setItem("poker-quick-fold", next ? "yes" : "no"); } catch { /* Keep the setting for this session. */ } }}>快速棄牌 {quickFold ? "ON" : "OFF"}</button>}<button onClick={() => setLeakFinderOpen(true)}>Leak Finder</button><button onClick={openScenarioLab}>情境訓練</button><button className={studyMode ? "active" : ""} onClick={() => setStudyMode(value => !value)}>Study {studyMode ? "ON" : "OFF"}</button></div>
       </div>
-      <div className="hand-meta"><span>第 {game.handNo} 手</span><span>{STREET_LABEL[game.street]}</span><span className={`save-status ${saveStatus}`}>● {saveStatusLabel}</span><label className="standard-motion-control">動畫 <select aria-label="標準牌桌動畫速度" value={motionMode} onChange={event => changeMotionMode(event.target.value as "normal" | "fast" | "off")}><option value="normal">正常</option><option value="fast">快速</option><option value="off">關閉</option></select></label><button onClick={openLobby}>新牌桌</button></div>
+      <div className="hand-meta"><span>第 {game.handNo} 手</span><span>{STREET_LABEL[game.street]}</span><span className={`save-status ${saveStatus}`}>● {saveStatusLabel}</span><label className="standard-motion-control">動畫 <select aria-label="標準牌桌動畫速度" value={motionMode} onChange={event => changeMotionMode(event.target.value as "normal" | "fast" | "off")}><option value="normal">正常</option><option value="fast">快速</option><option value="off">關閉</option></select></label><button type="button" aria-pressed={riverSqueeze} onClick={toggleRiverSqueeze}>River 觸控揭牌 {riverSqueeze ? "ON" : "OFF"}</button><button onClick={openLobby}>新牌桌</button></div>
     </header>
     {isTournament && <><section className="tournament-hud" aria-label="錦標賽狀態">
       <div><span>LEVEL · {TOURNAMENT_SPEEDS[tournamentSpeed].label}</span><b>{blindLevel}</b></div><div><span>{mtt ? "此手盲注" : "盲注"}</span><b>{fmt(game.smallBlind ?? 0.5)} / {fmt(game.bigBlind ?? 1)}</b></div><div><span>BB ANTE</span><b>{game.bigBlindAnte ? fmt(game.bigBlindAnte) : "第3級起"}</b></div><div><span>下次升盲</span><b>{mtt ? blindLevel >= TOURNAMENT_BLINDS.length ? "最高級" : `${Math.floor(mttLevelRemaining / 60000)}:${String(Math.floor(mttLevelRemaining / 1000) % 60).padStart(2, "0")}` : `${blindCountdown} 手後`}</b></div><div><span>剩餘人數</span><b>{playersAbleToContinue} 人</b></div><div><span>你嘅籌碼</span><b>{fmt(hero.stack / (game.bigBlind ?? 1))} BB</b></div>

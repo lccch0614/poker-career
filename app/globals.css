@@ -454,3 +454,13 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 /* Keep the last bet and each settled pot/refund visually distinct. */
 .app-shell .standard-pot-award { opacity:0; animation-delay:var(--award-delay, 0ms); animation-fill-mode:forwards; }
 .app-shell .standard-pot-award b { position:absolute; top:-21px; left:50%; transform:translateX(-50%); white-space:nowrap; padding:2px 5px; border-radius:5px; background:#09241f; color:#ffe3a3; font:700 10px system-ui,sans-serif; }
+
+/* River reveal is a presentation-only mask over the already dealt card. */
+.river-squeeze{position:relative;display:block;width:48px;height:68px;min-width:48px;padding:0;border:0;border-radius:7px;background:transparent;overflow:hidden;touch-action:none;cursor:grab}
+.river-squeeze:focus-visible{outline:3px solid #fff;outline-offset:2px}.river-squeeze:active{cursor:grabbing}
+.river-squeeze-face,.river-squeeze-cover{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.river-squeeze-face .card{width:100%;height:100%}.river-squeeze-cover{border:3px solid #e6d8b7;border-radius:7px;background:repeating-linear-gradient(45deg,#153e45,#153e45 4px,#337367 4px,#337367 7px);color:#f6d993;font-size:20px}
+.river-squeeze-mini{width:38px;min-width:38px;height:53px}.river-squeeze-mini .river-squeeze-cover{font-size:15px}
+@media(max-width:500px){.standard-cinema-board .river-squeeze{width:40px;min-width:40px;height:57px}.aof-board .river-squeeze-mini{width:30px;min-width:30px;height:42px}}
+/* Equity and outs already appear below the table; avoid covering the board. */
+.aof-shell .aof-cinematic .aof-seat .aof-equity,.aof-shell .aof-cinematic .aof-seat .aof-outs-badge{display:none}
