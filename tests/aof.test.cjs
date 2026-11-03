@@ -5,10 +5,10 @@ const path = require('node:path');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, newAof, aofAct, aofDecision, aofPresentation, aofExposedEquity, aofBestFive, aofOuts, aofDuelLabel, aofNextHand, aofWhatIfBoard, aofHandKey, aofMatrixKey, aofCollectDeal, aofCollectResult, aofStartBossRun, aofRestartRun, AOF_BOSSES, AofTable };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, newAof, aofAct, aofDecision, aofPresentation, aofExposedEquity, aofBestFive, aofOuts, aofDuelLabel, aofNextHand, aofWhatIfBoard, aofHandKey, aofMatrixKey, aofCollectDeal, aofCollectResult, aofStartBossRun, aofRestartRun, AOF_BOSSES, AofTable, shouldPlayAofCinematic };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, newAof, aofAct, aofDecision, aofPresentation, aofExposedEquity, aofBestFive, aofOuts, aofDuelLabel, aofNextHand, aofWhatIfBoard, aofHandKey, aofMatrixKey, aofCollectDeal, aofCollectResult, aofStartBossRun, aofRestartRun, AOF_BOSSES, AofTable } = require('../app/page.tsx');
+const { newHand, newAof, aofAct, aofDecision, aofPresentation, aofExposedEquity, aofBestFive, aofOuts, aofDuelLabel, aofNextHand, aofWhatIfBoard, aofHandKey, aofMatrixKey, aofCollectDeal, aofCollectResult, aofStartBossRun, aofRestartRun, AOF_BOSSES, AofTable, shouldPlayAofCinematic } = require('../app/page.tsx');
 // Deep stacks must adjust to the largest *live opponent*, not their own stack.
 const effectiveDepthGame = newHand([20, 3, 2, 0], 0, 1, () => .5, [0,0,0,0], 'effective-depth', .25);
 effectiveDepthGame.players[0].hole = [{rank: 8, suit: 's'}, {rank: 7, suit: 'h'}];
@@ -297,3 +297,11 @@ assert.equal(resolvedOneAble.game.finished, true);
 assert.equal(resolvedOneAble.runHands, 1);
 assert.equal(resolvedOneAble.stats[0].pushOpportunities, 0);
 assert.ok(Math.abs(resolvedOneAble.game.players.reduce((sum, p) => sum + p.stack, 0) - 2.4) < 1e-8);
+
+// The hero must remain in the hand before a large AOF pot gets a cinematic.
+let cinematicState = newAof();
+while (!cinematicState.game.finished) cinematicState = aofAct(cinematicState, cinematicState.game.turn, true);
+assert.equal(shouldPlayAofCinematic(cinematicState.game), true);
+const heroFolded = {...cinematicState.game, players: cinematicState.game.players.map((p,i) => i === 0 ? {...p, folded:true} : p)};
+assert.equal(shouldPlayAofCinematic(heroFolded), false);
+assert.equal(shouldPlayAofCinematic({...cinematicState.game, settledBets:[2,2,2,2]}), false);

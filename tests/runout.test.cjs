@@ -39,6 +39,7 @@ assert.equal(shouldPlayStandardCinematic(pending, showdown(pending, 2)), false);
 assert.equal(shouldPlayStandardCinematic(pending, {...once, settledBets:[10,10]}), false);
 assert.equal(shouldPlayStandardCinematic(pending, {...once, settledBets:[15,25]}), true);
 assert.equal(shouldPlayStandardCinematic(pending, {...once, showdownAwards:undefined}), false);
+assert.equal(shouldPlayStandardCinematic(pending, {...once, players: once.players.map((p,i) => i === 0 ? {...p, folded:true} : p)}), false);
 assert.equal(shouldPlayStandardCinematic(once, once), false); // restored completed hands do not replay
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
@@ -52,6 +53,7 @@ assert.equal(once.board.length, 5);
 
 const multi = showdown(game, 1);
 assert.equal(shouldPlayStandardCinematic(game, multi), true);
+assert.equal(shouldPlayStandardCinematic(game, {...multi, players: multi.players.map((p,i) => i === 0 ? {...p, folded:true} : p)}), false);
 assert.equal(multi.showdownAwards.length, 3);
 assert.deepEqual(multi.showdownAwards.map(a => a.amount), [30,20,10]);
 assert.equal(multi.showdownAwards[2].refund, true);
@@ -61,7 +63,7 @@ for (let i=0; i<multi.players.length; i++) {
   assert.ok(Math.abs(multi.players[i].stack - paid) < 1e-8);
 }
 const multiHtml = renderToStaticMarkup(React.createElement(StandardShowdown,{presentation:{game:multi,startBoard:game.board},fast:false,onClose(){}}));
-assert.ok(multiHtml.includes('切換自動揭牌'));
+assert.ok(multiHtml.includes('切換觸控揭牌'));
 assert.ok(!multiHtml.includes('class="standard-pot-result"'));
 assert.ok(!multiHtml.includes('退回未被跟注籌碼'));
 
