@@ -134,6 +134,12 @@ assert.equal(aofDuelLabel([cards('8s 8d'),cards('Ah Kh')],[.51,.49],[]).title,'ç
 const kings = [cards('Ks Kd'),cards('As Ad')];
 const blankTurn = cards('2c 7d 9h Js');
 let outs = aofOuts(kings,blankTurn);
+const blockedOuts = aofOuts(kings,blankTurn,cards('Kh'));
+assert.equal(blockedOuts[0].win.length,1);
+assert.ok(!blockedOuts[0].win.some(card => card.rank === 13 && card.suit === 'h'));
+const equityBefore = aofExposedEquity(kings,blankTurn);
+const equityAfterExposed = aofExposedEquity(kings,blankTurn,cards('Kh'));
+assert.ok(equityAfterExposed[0] < equityBefore[0]);
 assert.equal(outs[0].behind,true);
 assert.deepEqual(outs[0].win.map(c=>c.rank),[13,13]);
 assert.equal(outs[0].tie.length,0);

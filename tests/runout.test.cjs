@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, shouldSqueezeRunout, runoutStages, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, shouldSqueezeRunout, shouldShowHeroAllIn, runoutStages, ShowdownContext, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, shouldSqueezeRunout, runoutStages, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, shouldSqueezeRunout, shouldShowHeroAllIn, runoutStages, ShowdownContext, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -34,6 +34,12 @@ let pending = { ...newHand([20, 20], 0, 10, () => .41), allowRunouts: true };
 pending = act(pending, pending.turn, 'raise', 20);
 pending = act(pending, pending.turn, 'checkcall');
 const once = showdown(pending, 1);
+assert.equal(shouldShowHeroAllIn(pending, once), true);
+assert.equal(shouldShowHeroAllIn({...pending, board:once.board}, once), true); // river already dealt
+assert.equal(shouldShowHeroAllIn(pending, {...once, players:once.players.map((p,i) => i === 0 ? {...p, allIn:false} : p)}), false);
+assert.equal(shouldShowHeroAllIn(pending, {...once, players:once.players.map((p,i) => i === 0 ? {...p, folded:true} : p)}), false);
+assert.equal(shouldShowHeroAllIn(pending, {...once, finished:false}), false);
+assert.equal(shouldShowHeroAllIn(pending, {...once, players:once.players.map((p,i) => i ? {...p, folded:true} : p)}), false);
 assert.equal(shouldPlayStandardCinematic(pending, once), true);
 assert.equal(shouldPlayStandardCinematic(pending, showdown(pending, 2)), false);
 assert.equal(shouldSqueezeRunout(pending, showdown(pending, 2)), true);
@@ -54,6 +60,12 @@ assert.equal(shouldPlayStandardCinematic(pending, {...once, players: once.player
 assert.equal(shouldPlayStandardCinematic(once, once), false); // restored completed hands do not replay
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
+const visibleContext = {board: once.board.slice(0,4), players:once.players.filter(p => !p.folded).map(p => ({name:p.name, hole:p.hole})), dead:[]};
+const contextHtml = renderToStaticMarkup(React.createElement(ShowdownContext,{context:visibleContext}));
+assert.ok(contextHtml.includes('公共牌'));
+assert.ok(contextHtml.includes('包含平分'));
+assert.ok(contextHtml.includes('你'));
+assert.equal((contextHtml.match(/peel-context-player"/g) || []).length, 2);
 const html = renderToStaticMarkup(React.createElement(StandardShowdown, {presentation:{game:once,startBoard:pending.board},fast:false,onClose(){}}));
 assert.ok(html.includes('重要底池攤牌'));
 assert.ok(html.includes('跳過動畫'));
