@@ -334,6 +334,12 @@ function shouldSqueezeRunout(before: Game, after: Game) {
     && after.board.length === 5 && after.players.filter(p => !p.folded).length >= 2
     && after.players.some(p => !p.folded && p.allIn) && !!after.showdownAwards?.length;
 }
+function shouldShowHeroAllIn(before: Game, after: Game) {
+  return !before.finished && after.finished && before.tableId === after.tableId && before.handNo === after.handNo
+    && after.street === "showdown" && !after.players[0].folded && after.players[0].allIn
+    && after.players.filter(player => !player.folded).length >= 2 && !!after.showdownAwards?.length;
+}
+
 function shouldPlayStandardCinematic(before: Game, after: Game) {
   const contenders = after.players.map((p, i) => !p.folded ? i : -1).filter(i => i >= 0);
   const bb = after.bigBlind ?? 1;
@@ -343,7 +349,25 @@ function shouldPlayStandardCinematic(before: Game, after: Game) {
 }
 
 // Revealing affects presentation only; the card and settlement are already fixed.
-function RiverSqueeze({ card, onReveal, onSkip }: { card: Card; mini?: boolean; onReveal: () => void; onSkip: () => void }) {
+type RevealContext = { board: Card[]; players: { name: string; hole: Card[] }[]; dead?: Card[]; run?: number; runs?: number };
+function ShowdownContext({ context }: { context: RevealContext }) {
+  const { board, players, dead = [], run = 0, runs = 1 } = context;
+  const holes = players.map(player => player.hole);
+  const equities = useMemo(() => aofExposedEquity(holes, board, dead), [context]);
+  const outs = useMemo(() => aofOuts(holes, board, dead), [context]);
+  const scores = holes.map(hole => bestScore([...hole, ...board]));
+  const heroComparison = scores.length ? compareScore(scores[0], scores.reduce((best, score) => compareScore(score, best) > 0 ? score : best)) : 0;
+  const leaders = scores.filter(score => scores.length && compareScore(score, scores[0]) === 0).length;
+  const heroOuts = outs[0];
+  const formatCards = (cards: Card[]) => cards.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ");
+  return <section className="peel-context" aria-label="攤牌資訊">
+    <div className="peel-context-board"><b>{runs > 1 ? `第 ${run+1}/${runs} 次 · ` : ""}公共牌</b><span>{board.map((card,i) => <CardView key={i} card={card} mini />)}</span></div>
+    <div className="peel-context-players" aria-label="已亮底牌及勝率">{players.map((player,i) => <div className="peel-context-player" key={i}><b>{player.name}</b><span>{player.hole.map((card,j) => <CardView key={j} card={card} mini />)}</span><strong>{(equities[i] * 100).toFixed(1)}%</strong></div>)}</div>
+    <div className="peel-context-outs">{heroComparison < 0 && heroOuts ? <><b>你：反超 {heroOuts.win.length} 張 · 追平 {heroOuts.tie.length} 張</b>{(heroOuts.win.length > 0 || heroOuts.tie.length > 0) && <small>{heroOuts.win.length > 0 ? `反超 ${formatCards(heroOuts.win)}` : ""}{heroOuts.tie.length > 0 ? `　追平 ${formatCards(heroOuts.tie)}` : ""}</small>}</> : <b>{leaders > 1 ? "你目前並列領先" : "你目前領先"}</b>}</div>
+    <small className="peel-context-note">勝率按已亮底牌及公開牌計算，包含平分；邊池資格不同，實際派彩可能有別。</small>
+  </section>;
+}
+function RiverSqueeze({ card, context, onReveal, onSkip }: { card: Card; context: RevealContext; mini?: boolean; onReveal: () => void; onSkip: () => void }) {
   const [peels, setPeels] = useState<PeelRect[]>([]);
   const [active, setActive] = useState<PeelRect | null>(null);
   const pointer = useRef<{ x: number; y: number; edge: PeelEdge; width: number; height: number } | null>(null);
@@ -357,6 +381,7 @@ function RiverSqueeze({ card, onReveal, onSkip }: { card: Card; mini?: boolean; 
   return createPortal(<div className="peel-overlay" role="dialog" aria-modal="true" aria-label="River 自由揭牌">
     <section className="peel-dialog">
       <header><span>RIVER SQUEEZE</span><h2>慢慢揭開河牌</h2><p>由牌邊或牌角向內拖動，可分幾次揭開</p></header>
+      <ShowdownContext context={context} />
       <div className="peel-card" role="img" aria-label="未完全揭開的河牌" tabIndex={0} onPointerDown={event => {
         if (pointer.current) return;
         const bounds = event.currentTarget.getBoundingClientRect();
@@ -409,11 +434,13 @@ function StandardShowdown({ presentation, fast, squeezeEnabled, onClose }: { pre
   const award = result ? awards[awardIndex] : undefined;
   const stage = stages[Math.min(step, stages.length - 1)];
   const stageCount = result ? 5 : stage.count;
-  const covered = manualReveal && !result && stageCount === 5 && !revealed.includes(step);
+  const covered = manualReveal && !result && startBoard.length < 5 && stageCount === 5 && !revealed.includes(step);
   const count = covered ? stageCount - 1 : stageCount;
   const board = stage.board.slice(0, count);
   const holes = contenders.map(i => game.players[i].hole);
-  const equities = useMemo(() => aofExposedEquity(holes, board), [game, stage.run, count]);
+  // Only prior fully revealed boards are public blockers; never inspect future runouts.
+  const dead = boards.slice(0, stage.run).flat().filter(card => !board.some(known => cardKey(known) === cardKey(card)));
+  const equities = useMemo(() => aofExposedEquity(holes, board, dead), [game, stage.run, count]);
   const moment = useMemo(() => count >= 4 && !result && !covered ? aofMoment(holes, board, contenders.map(i => game.players[i].name)) : null, [game, stage.run, count, result, covered]);
   const lastAward = result && awardIndex >= awards.length - 1;
   useEffect(() => {
@@ -432,7 +459,7 @@ function StandardShowdown({ presentation, fast, squeezeEnabled, onClose }: { pre
         <div className="standard-cinema-equity"><i><span style={{width:`${equities[i] * 100}%`}} /></i><b>{(equities[i] * 100).toFixed(1)}%</b></div>
         {award?.winners.includes(index) && <div className="standard-cinema-award" key={`${awardIndex}-${index}`}><i>●</i><i>●</i><i>●</i><strong>{award.refund ? "退回" : "收池"} +{fmt(award.share)}</strong></div>}
       </div>)}</div>
-      <div className="standard-cinema-board">{[0,1,2,3,4].map(i => covered && i === 4 ? <RiverSqueeze key={`river-${stage.run}`} card={stage.board[4]} onReveal={revealCard} onSkip={onClose} /> : <div key={`${i}-${i<count}`} className={i<count && i>=startBoard.length ? "standard-cinema-flip" : ""}><CardView card={board[i]} /></div>)}</div>
+      <div className="standard-cinema-board">{[0,1,2,3,4].map(i => covered && i === 4 ? <RiverSqueeze key={`river-${stage.run}`} card={stage.board[4]} context={{board, players: contenders.map(i => ({name:game.players[i].name, hole:game.players[i].hole})), dead, run:stage.run, runs:boards.length}} onReveal={revealCard} onSkip={onClose} /> : <div key={`${i}-${i<count}`} className={i<count && i>=startBoard.length ? "standard-cinema-flip" : ""}><CardView card={board[i]} /></div>)}</div>
       {covered && <p className="standard-squeeze-hint" role="status">拖動或點按牌背揭開河牌</p>}
       {award && <div className="standard-pot-result" key={`pot-${awardIndex}`} role="status"><b>{awardName} · {fmt(award.amount)}</b><span>{award.winners.map(index => game.players[index].name).join("、")} {award.refund ? "獲退回" : award.winners.length > 1 ? "平分" : "收池"} · 每人 {fmt(award.share)}</span></div>}
       <p>{result ? "依照實際主池、邊池及退回金額逐項顯示。" : "顯示所有已亮底牌嘅估算攤牌權益；平分計入。邊池資格不同，實際派彩以逐池結算為準。"}</p>
@@ -1409,9 +1436,9 @@ function aofPresentation(state: AofState) {
 }
 
 // Evaluate only the exposed holes and board. Unseen future board/deck and folded holes are not inputs.
-function aofExposedEquity(holes: Card[][], board: Card[]) {
+function aofExposedEquity(holes: Card[][], board: Card[], dead: Card[] = []) {
   if (holes.length < 2) return holes.map(() => 1);
-  const known = [...holes.flat(), ...board];
+  const known = [...holes.flat(), ...board, ...dead];
   const available = makeDeck(seededRandom(808)).filter(c => !known.some(k => cardKey(c) === cardKey(k)));
   const rng = seededRandom(9107 + known.reduce((sum,c) => sum+c.rank*13+SUITS.indexOf(c.suit),0));
   const missing = 5-board.length;
@@ -1426,12 +1453,12 @@ function aofExposedEquity(holes: Card[][], board: Card[]) {
   return points.map(p => p/runs.length);
 }
 
-function aofOuts(holes: Card[][], board: Card[]) {
+function aofOuts(holes: Card[][], board: Card[], dead: Card[] = []) {
   if (holes.length < 2 || (board.length !== 3 && board.length !== 4)) return [];
   const current = holes.map(hole => bestScore([...hole,...board]));
   const lead = current.reduce((a,b) => compareScore(a,b) >= 0 ? a : b);
   const result = current.map(score => ({ behind: compareScore(score,lead) < 0, win: [] as Card[], tie: [] as Card[] }));
-  const known = new Set([...holes.flat(),...board].map(cardKey));
+  const known = new Set([...holes.flat(),...board,...dead].map(cardKey));
   // Enumerate every publicly unseen card; actual deck and mucked hands are deliberately absent.
   for (const suit of SUITS) for (let rank=14;rank>=2;rank--) {
     const card: Card = {rank,suit};
@@ -1657,7 +1684,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, squeezeEnabl
         {paid && cinematic && !reduced && winners.includes(index) && <span className="aof-award-flight" key={`award-${game.handNo}-${index}`} aria-hidden="true"><i /><i /><i /></span>}
         {winners.includes(index) && <span className="aof-payout">收池 +{fmt(game.showdownAwards ? game.showdownAwards.filter(award => !award.refund && award.winners.includes(index)).reduce((sum, award) => sum + award.share, 0) : p.stack-(game.startingStacks[index]-game.settledBets[index]))}BB</span>}
       </div>)}
-      <div className="aof-centre"><b>{foldReveal ? "娛樂揭牌" : paid ? "本手結束" : `底池 ${fmt(view.pot)}BB`}</b><div className="aof-board">{[0,1,2,3,4].map(i => <div key={`${game.handNo}-${i}-${!!displayBoard[i]}-${foldReveal}`} className={`${displayBoard[i] ? "aof-flip" : ""} ${paid && !foldReveal && displayBoard[i] && winningKeys.has(cardKey(displayBoard[i])) ? "aof-card-used" : ""}`}>{squeezePending && i === 4 ? <RiverSqueeze card={game.board[4]} mini onReveal={() => onChange({ ...state, revealStep: 4 })} onSkip={() => onChange({ ...state, revealStep: 5 })} /> : <CardView card={displayBoard[i]} mini />}</div>)}</div><span>{foldReveal ? "假設牌面 · 不計入結果" : revealing ? stageLabel : `第 ${game.handNo} 手`}</span></div>
+      <div className="aof-centre"><b>{foldReveal ? "娛樂揭牌" : paid ? "本手結束" : `底池 ${fmt(view.pot)}BB`}</b><div className="aof-board">{[0,1,2,3,4].map(i => <div key={`${game.handNo}-${i}-${!!displayBoard[i]}-${foldReveal}`} className={`${displayBoard[i] ? "aof-flip" : ""} ${paid && !foldReveal && displayBoard[i] && winningKeys.has(cardKey(displayBoard[i])) ? "aof-card-used" : ""}`}>{squeezePending && i === 4 ? <RiverSqueeze card={game.board[4]} mini context={{board:view.board, players:contenders.map(i => ({name:game.players[i].name, hole:game.players[i].hole}))}} onReveal={() => onChange({ ...state, revealStep: 4 })} onSkip={() => onChange({ ...state, revealStep: 5 })} /> : <CardView card={displayBoard[i]} mini />}</div>)}</div><span>{foldReveal ? "假設牌面 · 不計入結果" : revealing ? stageLabel : `第 ${game.handNo} 手`}</span></div>
     </section>
     {cinematic && exposed && equities.length > 1 && <section className="aof-equity-bars" aria-label="攤牌即時底池權益"><div><strong>底池權益</strong><small>{view.board.length < 4 ? "模擬估算" : "完整枚舉"} · 平分計入</small></div>{contenders.map((index, i) => <div className="aof-equity-row" key={index}><span>{game.players[index].name}</span><div className="aof-equity-track"><i style={{ width: `${Math.max(0, Math.min(100, equities[i] * 100))}%`, "--equity-color": ["#e7bd6c", "#77d8c2", "#8da9eb", "#df8e94"][i % 4] } as React.CSSProperties} /></div><b>{(equities[i] * 100).toFixed(1)}%</b></div>)}<p>按已亮底牌及目前公用牌計算；邊池實際分配可有不同。</p></section>}
     {outs.some(o => o.behind) && <section className="aof-outs-panel" aria-label="落後玩家的outs"><h2>{view.board.length === 3 ? "等 Turn" : "等 River"} · 落後方 OUTS</h2>{outs.map((o,i) => o.behind ? <div className="aof-outs-row" key={contenders[i]}><strong>{PLAYER_NAMES[contenders[i]]} · 反超 {o.win.length} 張／追平 {o.tie.length} 張</strong>{o.win.length > 0 && <div><b>反超</b>{o.win.map(c => <span className={c.suit === "h" || c.suit === "d" ? "red" : ""} key={cardKey(c)}>{RANK_LABEL[c.rank] ?? c.rank}{SUIT_GLYPH[c.suit]}</span>)}</div>}{o.tie.length > 0 && <div><b>追平</b>{o.tie.map(c => <span className={c.suit === "h" || c.suit === "d" ? "red" : ""} key={cardKey(c)}>{RANK_LABEL[c.rank] ?? c.rank}{SUIT_GLYPH[c.suit]}</span>)}</div>}{o.win.length+o.tie.length === 0 && <p>{view.board.length === 3 ? "下一張未能直接反超或追平；仍可能靠兩張連續好牌逆轉。" : "已無反超或追平嘅 River 牌。"}</p>}</div> : null)}<p>按目前牌型判定落後；列出下一張能超越全部對手或並列第一嘅牌。{view.board.length === 3 ? "Flop outs只代表Turn暫時領先，River仍可能被反超；不包括兩張連續好牌嘅組合。" : "Turn outs代表River最終結果。"}未揭底牌視為未知。</p></section>}
@@ -2313,7 +2340,8 @@ export default function Home() {
     if (deal) setStandardCinematic(null);
     const fullCinema = motionMode !== "off" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && shouldPlayStandardCinematic(previous, game);
     const squeezeRunout = riverSqueeze && shouldSqueezeRunout(previous, game);
-    if (fullCinema || squeezeRunout) setStandardCinematic({ game, startBoard: previous.board, full: fullCinema });
+    const heroShowdown = shouldShowHeroAllIn(previous, game);
+    if (fullCinema || squeezeRunout || heroShowdown) setStandardCinematic({ game, startBoard: previous.board, full: fullCinema });
     if (deal) setDealMotion({ id: ++motionSerial.current, tableId: game.tableId, handNo: game.handNo, seats: game.players.map((seat, index) => seat.hole.length ? index : -1).filter(index => index >= 0) });
     const boardFrom = !deal && game.board.length > previous.board.length ? previous.board.length : null;
     const foldedSeat = !deal ? game.players.findIndex((seat, index) => !previous.players[index]?.folded && seat.folded) : -1;
