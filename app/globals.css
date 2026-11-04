@@ -468,3 +468,10 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 .standard-cinema .standard-cinema-board .river-squeeze{width:48px;min-width:48px;max-width:48px;height:68px;min-height:68px;padding:0;border:0;background:transparent}
 .aof-shell .aof-board .river-squeeze-mini{width:48px;min-width:48px;height:53px;margin:-5px -9px;z-index:3}
 @media(max-width:500px){.standard-cinema .standard-cinema-board .river-squeeze{width:48px;min-width:48px;max-width:48px;height:57px;min-height:57px}}
+.peel-overlay{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:max(12px,env(safe-area-inset-top)) 16px max(12px,env(safe-area-inset-bottom));background:#02110ff5;color:#f7f2e3;overflow:auto}
+.peel-dialog{width:min(100%,390px);max-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center}
+.peel-dialog header span{font-size:11px;letter-spacing:.2em;color:#d8bd80}.peel-dialog h2{font-size:22px;margin:5px}.peel-dialog p{font-size:14px;margin:4px;color:#b9d2c4}
+.peel-card{width:min(65vw,240px,calc((100dvh - 235px)*.714));aspect-ratio:5/7;touch-action:none;user-select:none;cursor:grab;filter:drop-shadow(0 15px 18px #0009);border-radius:12px;flex:none}
+.peel-card:active{cursor:grabbing;filter:drop-shadow(4px 18px 15px #000b)}.peel-card:focus-visible{outline:3px solid #f5d58b;outline-offset:5px}.peel-card svg{display:block;width:100%;height:100%}
+.peel-actions{width:100%;display:flex;gap:10px}.peel-actions button{flex:1;min-height:48px;padding:10px;border-radius:10px;border:1px solid #d7b868;background:#183b31;color:#f9e6b4;font-weight:700}.peel-actions button:first-child{background:#dbb766;color:#162a21}
+@media(prefers-reduced-motion:reduce){.peel-card,.peel-card:active{filter:none}}
