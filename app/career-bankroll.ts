@@ -27,13 +27,13 @@ export function careerStakeRisk(mode: CareerMode, balance: number, stake: number
 
 export type CareerTransaction = {
   id: string; sessionId: string; mode: "cash" | "tournament" | "aof";
-  kind: "buy-in" | "rebuy" | "cash-out" | "entry" | "prize" | "life";
-  amount: number; at: number;
+  kind: "buy-in" | "rebuy" | "cash-out" | "entry" | "prize" | "life" | "bad-beat" | "bounty";
+  amount: number; at: number; bounty?: boolean;
 };
 export type CareerWallet = {
   version: 1; balance: number; transactions: CareerTransaction[];
   cash?: { id: string; bb: number; buyInsPaid: number };
-  tournament?: { id: string; entry: number; tableSize: number };
+  tournament?: { id: string; entry: number; tableSize: number; bounty?: boolean };
   aof?: { id: string; bb: number; livesPaid: number };
 };
 
@@ -67,7 +67,10 @@ export function restoreCareerWallet(value: unknown, legacy = false): CareerWalle
   }
   if (wallet.tournament) {
     const session = wallet.tournament;
+    if (session.bounty !== undefined && typeof session.bounty !== "boolean") throw new Error("Tournament bounty setting invalid");
     if (typeof session.id !== "string" || !session.id || !TOURNAMENT_ENTRIES.includes(session.entry as typeof TOURNAMENT_ENTRIES[number]) || !Number.isInteger(session.tableSize) || session.tableSize < 2 || session.tableSize > 8 && session.tableSize !== MTT_ENTRIES || !matchesEntry(`tournament:${session.id}:entry`, session.id, "tournament", "entry", -session.entry)) throw new Error("Tournament session invalid");
+    const entry = wallet.transactions.find(item => item.id === `tournament:${session.id}:entry`);
+    if ((entry?.bounty === true) !== (session.bounty === true)) throw new Error("Tournament bounty setting mismatch");
   }
   if (wallet.aof) {
     const session = wallet.aof;
@@ -82,6 +85,16 @@ function transact(wallet: CareerWallet, entry: CareerTransaction): CareerWallet 
   const balance = Math.round((wallet.balance + entry.amount) * 100) / 100;
   if (!Number.isFinite(entry.amount) || !Number.isFinite(balance) || balance < 0) return null;
   return { ...wallet, balance, transactions: [...wallet.transactions, entry] };
+}
+
+/** A stable event ID makes replay of an already credited reward harmless. */
+export function creditReward(wallet: CareerWallet, mode: CareerMode, sessionId: string, eventId: string, kind: "bad-beat" | "bounty", amount: number): CareerWallet | null {
+  if (!sessionId || !eventId || !Number.isFinite(amount) || amount <= 0 || Math.abs(Math.round(amount * 100) - amount * 100) > 1e-7) return null;
+  if ((kind === "bad-beat" && mode === "tournament") || (kind === "bounty" && mode !== "tournament")) return null;
+  const active = mode === "cash" ? wallet.cash : mode === "aof" ? wallet.aof : wallet.tournament;
+  if (!active || active.id !== sessionId) return null;
+  if (kind === "bounty" && !wallet.tournament?.bounty) return null;
+  return transact(wallet, { id: `${mode}:${sessionId}:${kind}:${eventId}`, sessionId, mode, kind, amount, at: Date.now() });
 }
 
 export function openCash(wallet: CareerWallet, id: string, bb: number): CareerWallet | null {
@@ -110,10 +123,10 @@ export function cashCannotRebuy(wallet: CareerWallet, id: string, stackBb: numbe
     || !!wallet.cash && wallet.cash.id === id && wallet.balance < 100 * wallet.cash.bb;
 }
 
-export function openTournament(wallet: CareerWallet, id: string, entry: number, tableSize: number): CareerWallet | null {
+export function openTournament(wallet: CareerWallet, id: string, entry: number, tableSize: number, bounty = false): CareerWallet | null {
   if (wallet.tournament || !TOURNAMENT_ENTRIES.includes(entry as typeof TOURNAMENT_ENTRIES[number]) || !Number.isInteger(tableSize) || tableSize < 2 || tableSize > 8 && tableSize !== MTT_ENTRIES || wallet.transactions.some(tx => tx.sessionId === id)) return null;
-  const paid = transact(wallet, { id: `tournament:${id}:entry`, sessionId: id, mode: "tournament", kind: "entry", amount: -entry, at: Date.now() });
-  return paid && { ...paid, tournament: { id, entry, tableSize } };
+  const paid = transact(wallet, { id: `tournament:${id}:entry`, sessionId: id, mode: "tournament", kind: "entry", amount: -entry, at: Date.now(), ...(bounty ? { bounty: true } : {}) });
+  return paid && { ...paid, tournament: { id, entry, tableSize, ...(bounty ? { bounty: true } : {}) } };
 }
 
 export function settleTournament(wallet: CareerWallet, id: string, place: number, tiedPlaces: number[] = []): CareerWallet | null {

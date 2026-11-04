@@ -10,7 +10,8 @@ import { getPreflopAdvice, getTablePosition, positionOpenPercent, type TablePosi
 import { RANGE_POSITIONS, RANGE_RANKS, handsForPosition, positionRangePresets, rangeCell, rangePercent, rangePreset, restoreHandFilter, shouldAutoFold, wasAutoFolded, type HandFilter } from "./hand-filter";
 import { emptyHandTracker, emptySessionStats, settlePlayerSession, statPercent, trackPreflopAction, restoreOpponentProfiles, restoreMttNotes, recordOpponentProfile, updateOpponentNote, type OpponentProfile, type PlayerHandTracker, type PlayerSessionStats } from "./session-stats";
 import { TOURNAMENT_BLINDS, TOURNAMENT_SPEEDS, handsUntilBlindUp, payoutShares, potsWithBigBlindAnte, prizeForPlace, recordTournamentFinishes, tournamentBigBlindAnte, tournamentBlinds, tournamentCanContinue, tournamentLevel, tournamentPhase, tournamentStandings, type TournamentFinish, type TournamentSpeed } from "./tournament";
-import { AOF_BIG_BLINDS, CASH_BIG_BLINDS, TOURNAMENT_ENTRIES, aofContinuationStake, buyAofLife, careerStakeRisk, cashCannotRebuy, closeAof, closeCash, newCareerWallet, openAof, openCash, openTournament, rebuyCash, restoreCareerWallet, settleTournament, type CareerWallet, type CareerStakeRisk } from "./career-bankroll";
+import { AOF_BIG_BLINDS, CASH_BIG_BLINDS, TOURNAMENT_ENTRIES, aofContinuationStake, buyAofLife, careerStakeRisk, cashCannotRebuy, closeAof, closeCash, creditReward, newCareerWallet, openAof, openCash, openTournament, rebuyCash, restoreCareerWallet, settleTournament, type CareerWallet, type CareerStakeRisk } from "./career-bankroll";
+import { badBeatResult, bountyEvents } from "./reward-rules";
 import { MTT_BACKGROUND_INTERVAL_MS, MTT_ENTRIES, MTT_LEVEL_MS, MTT_PAID, completeMttBatch, completeMttRound, isMttField, mttAverage, mttClockTick, mttElapsed, mttLevel, mttPayoutShares, mttPrize, mttRemaining, mttStandings, newMttField, rebalanceMttField, restoreMttField, type MttField, type MttHighlight } from "./mtt-field";
 import { extendDecisionClock, newDecisionClock, pauseDecisionClock, restoreDecisionClock, tickDecisionClock, type TournamentDecisionClock } from "./tournament-clock";
 import { saveKeepalive } from "./save-transport";
@@ -68,7 +69,7 @@ type SavedPokerState = {
   handFilter?: HandFilter;
   gameMode?: GameMode; lobbyGameMode?: GameMode; tournamentSpeed?: TournamentSpeed; lobbyTournamentSpeed?: TournamentSpeed;
   career?: CareerWallet; lobbyCashBb?: number; lobbyTournamentEntry?: number; lobbyAofBb?: number;
-  mtt?: MttField; lobbyMtt?: boolean;
+  mtt?: MttField; lobbyMtt?: boolean; lobbyBounty?: boolean;
   mttSessions?: PlayerSessionStats[];
   mttNotes?: Record<string, string>;
   opponentProfiles?: Record<string, OpponentProfile>;
@@ -700,6 +701,14 @@ function mttHandForHand(field: MttField) {
   return remaining > MTT_PAID && remaining <= MTT_PAID + 8 || remaining === 9;
 }
 
+function withMttBounties(field: MttField, games: Array<Game | null>, tables: number[][]): MttField {
+  if (!field.bounty) return field;
+  const known = new Set(field.bounty.events.map(event => event.id));
+  const events = games.flatMap((hand, table) => hand ? bountyEvents(hand, field.bounty!.sessionId, `table-${table}-hand-${hand.handNo}`, tables[table], field.bounty!.cents) : [])
+    .filter(event => !known.has(event.id) && !!known.add(event.id));
+  return events.length ? { ...field, bounty: { ...field.bounty, events: [...field.bounty.events, ...events] } } : field;
+}
+
 function advanceMttBackground(field: MttField, speed: TournamentSpeed, now = Date.now(), difficulty: Difficulty = "hard"): MttField {
   const ticked = mttClockTick(field, now, true);
   if (mttHandForHand(ticked)) return ticked;
@@ -709,7 +718,7 @@ function advanceMttBackground(field: MttField, speed: TournamentSpeed, now = Dat
   const games = ticked.tables.map((_, table) => selected.has(table) ? simulateMttTable(ticked, table, speed, now, difficulty) : null);
   const outcomes = games.flatMap((hand, table) => hand ? [{ table, ids: ticked.tables[table], stacks: hand.players.map(player => player.stack) }] : []);
   const settled = outcomes.length ? completeMttBatch(ticked, outcomes, ticked.handNo) : ticked;
-  return withMttHighlights({ ...settled, backgroundCursor: cursor + selected.size }, games.map((hand, table) => hand && mttHighlight(ticked, table, hand, now)));
+  return withMttBounties(withMttHighlights({ ...settled, backgroundCursor: cursor + selected.size }, games.map((hand, table) => hand && mttHighlight(ticked, table, hand, now))), games, ticked.tables);
 }
 
 function advanceMttField(field: MttField, speed: TournamentSpeed, heroHand?: Game, difficulty: Difficulty = "hard"): MttField {
@@ -717,12 +726,12 @@ function advanceMttField(field: MttField, speed: TournamentSpeed, heroHand?: Gam
   const ticked = mttClockTick(field, now, false);
   if (heroHand && !mttHandForHand(field)) {
     const settled = completeMttBatch(ticked, [{ table: 0, ids: ticked.tables[0], stacks: heroHand.players.map(player => player.stack) }]);
-    return rebalanceMttField(settled);
+    return rebalanceMttField(withMttBounties(settled, [heroHand], ticked.tables));
   }
   const games = ticked.tables.map((_, table) => heroHand && table === 0 ? null : simulateMttTable(ticked, table, speed, now, difficulty));
   const outcomes = ticked.tables.map((ids, table) => ({ ids, stacks: heroHand && table === 0 ? heroHand.players.map(player => player.stack) : games[table]?.players.map(player => player.stack) ?? ids.map(id => ticked.stacks[id]) }));
   const settled = completeMttRound(ticked, outcomes);
-  return withMttHighlights(settled, games.map((hand, table) => hand && mttHighlight(ticked, table, hand, now)));
+  return withMttBounties(withMttHighlights(settled, games.map((hand, table) => hand && mttHighlight(ticked, table, hand, now))), games.map((hand, table) => table === 0 && heroHand ? heroHand : hand), ticked.tables);
 }
 
 function allInEvDelta(game: Game) {
@@ -1534,7 +1543,7 @@ function shouldPlayAofCinematic(game: Game) {
   return game.finished && !game.players[0].folded && game.board.length === 5 && game.players.filter(p => !p.folded).length >= 2 && game.settledBets.reduce((sum, bet) => sum + bet, 0) >= 12;
 }
 
-function AofTable({ state, onChange, onExit, onCashOut, saveStatus, squeezeEnabled, onToggleSqueeze, careerBalance = 0, careerStake = 1, bankrollMessage = "", legacy = false, runInvested = 0, runReturned = 0, walletOpen = false }: { state: AofState; squeezeEnabled: boolean; onToggleSqueeze: () => void; onChange: (state: AofState) => void; onExit: () => void; onCashOut?: () => void; saveStatus: string; careerBalance?: number; careerStake?: number; bankrollMessage?: string; legacy?: boolean; runInvested?: number; runReturned?: number; walletOpen?: boolean }) {
+function AofTable({ state, onChange, onExit, onCashOut, saveStatus, squeezeEnabled, onToggleSqueeze, careerBalance = 0, careerStake = 1, bankrollMessage = "", legacy = false, runInvested = 0, runReturned = 0, walletOpen = false, jackpotAmount = 0 }: { state: AofState; squeezeEnabled: boolean; onToggleSqueeze: () => void; onChange: (state: AofState) => void; onExit: () => void; onCashOut?: () => void; saveStatus: string; careerBalance?: number; careerStake?: number; bankrollMessage?: string; legacy?: boolean; runInvested?: number; runReturned?: number; walletOpen?: boolean; jackpotAmount?: number }) {
   const { game } = state;
   const standard = state.variant === "standard";
   const view = aofPresentation(state);
@@ -1655,7 +1664,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, squeezeEnabl
     <header className="aof-header"><div><span>ALL-IN OR FOLD · {standard ? "標準牌桌" : boss ? "BOSS RUN" : "三命 RUN"}</span><h1>AOF · 4 人 · 8BB BUY-IN</h1></div><button onClick={onExit}>返回標準模式</button></header>
     <p className="aof-rules">{standard ? "0.5 / 1BB＋每人0.25BB Ante · 8BB 買入 · 籌碼跨手延續 · 對手爆倉後補入；你爆倉後可重新買入。" : "0.5 / 1BB＋每人0.25BB Ante · 籌碼跨手延續 · 每條命8BB · 爆倉先扣命，用盡三命先出局。"}{saveStatus}</p>
     <details className="aof-bankroll" aria-label="AOF 資金狀態"><summary className="aof-bankroll-summary"><span>Bankroll <b>{fmt(shownBalance)} C</b></span><span>桌上 <b>{!walletOpen && !revealing && !legacy ? "已兌回" : `${fmt(view.players[0].stack)} BB`}</b></span><span>詳細資料</span></summary><div className="aof-bankroll-title"><div><span>CAREER BANKROLL</span><strong>{legacy ? "舊版練習局" : `盲注 ${fmt(careerStake / 2)} / ${fmt(careerStake)} C`}</strong></div><small>{saveStatus}</small></div><div className="aof-bankroll-grid"><div><span>可用 Bankroll</span><b>{fmt(shownBalance)} C</b></div><div><span>桌上可用籌碼</span><b>{!walletOpen && !revealing && !legacy ? "已兌回" : `${fmt(view.players[0].stack)} BB`}</b><small>{legacy ? "練習籌碼" : !walletOpen && !revealing ? "—" : `約 ${fmt(currentStackValue)} C`}</small></div><div><span>本 Run 已投入</span><b>{legacy ? "—" : `${fmt(runInvested)} C`}</b></div><div><span>{walletOpen ? "完手可兌回" : "已兌回"}</span><b>{legacy ? "—" : revealing ? "結算中" : walletOpen ? paid ? `${fmt(currentStackValue)} C` : "完手後計算" : `${fmt(runReturned)} C`}</b></div></div><div className="aof-bankroll-footer"><span>{legacy ? "舊版練習局不計 Bankroll；開始新 Run 後生效。" : paid ? `本 Run 盈虧 ${runNet >= 0 ? "+" : ""}${fmt(runNet)} C` : "牌局進行中 · 籌碼投入底池後，完手先計算盈虧"}</span>{canCashOut && onCashOut && <button type="button" onClick={onCashOut}>結束 Run · 兌回 {fmt(currentStackValue)} C</button>}</div>{nextLifeNeeded && !legacy && <p className="aof-life-notice">下一手補命需 {fmt(nextLifeCost)} C · {careerBalance >= nextLifeCost ? "按下一手時扣款" : "餘額不足，無法補命"}</p>}</details>{bankrollMessage && <p className="bankroll-message" role="alert">{bankrollMessage}</p>}
-    <div className="aof-run-strip"><div><span>RUN</span><b>第 {state.runNo ?? 1} 局</b></div><div><span>本局手數</span><b>{state.runHands ?? 0}</b></div><div><span>連勝</span><b>{state.streak ?? 0}</b></div><div><span>娛樂 XP</span><b>{xp}</b></div></div>
+    {paid && jackpotAmount > 0 && <p className="bankroll-message" role="status">壞運大獎 +{fmt(jackpotAmount)} C · 牌面 {badBeatResult(game)?.board.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</p>}<div className="aof-run-strip"><div><span>RUN</span><b>第 {state.runNo ?? 1} 局</b></div><div><span>本局手數</span><b>{state.runHands ?? 0}</b></div><div><span>連勝</span><b>{state.streak ?? 0}</b></div><div><span>娛樂 XP</span><b>{xp}</b></div></div>
     <details className="aof-settings"><summary>動畫、音效及重新開始</summary><div className="aof-playback" aria-label="AOF動畫設定">
       <button aria-pressed={!fast} onClick={() => setFast(false)}>電影節奏</button><button aria-pressed={fast} onClick={() => setFast(true)}>快速</button>
       <button aria-pressed={reduced} onClick={() => setReduced(!reduced)}>減少動態 {reduced ? "ON" : "OFF"}</button>
@@ -1815,7 +1824,17 @@ function isSavedPokerState(value: unknown): value is SavedPokerState {
 
 function isRecoverablePokerState(value: unknown): value is SavedPokerState {
   if (!isSavedPokerState(value)) return false;
-  try { restoreCareerWallet(value.career, value.version === 1); return true; } catch { return false; }
+  try {
+    const wallet = restoreCareerWallet(value.career, value.version === 1);
+    if (value.mtt !== undefined && value.mtt !== null && !isMttField(value.mtt)) return false;
+    if (wallet.tournament?.bounty && wallet.tournament.tableSize === MTT_ENTRIES && wallet.tournament.id === value.game.tableId && !value.mtt?.bounty) return false;
+    if (value.mtt?.bounty) {
+      const bounty = value.mtt.bounty;
+      const entry = wallet.transactions.find(tx => tx.id === `tournament:${bounty.sessionId}:entry`);
+      if (bounty.sessionId !== value.game.tableId || !entry?.bounty || entry.mode !== "tournament" || bounty.cents !== Math.round(-entry.amount * 10)) return false;
+    }
+    return true;
+  } catch { return false; }
 }
 
 function HandFilterPanel({ filter, onChange, currentPosition, tableSize = 8 }: { filter: HandFilter; onChange: (next: HandFilter) => void; currentPosition?: TablePosition; tableSize?: number }) {
@@ -2080,6 +2099,7 @@ export default function Home() {
   const [bankrollMessage, setBankrollMessage] = useState("");
   const [lobbySize, setLobbySize] = useState(8);
   const [lobbyMtt, setLobbyMtt] = useState(false);
+  const [lobbyBounty, setLobbyBounty] = useState(false);
   const [mtt, setMtt] = useState<MttField | null>(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [tournamentClock, setTournamentClock] = useState<TournamentDecisionClock | null>(null);
@@ -2206,6 +2226,7 @@ export default function Home() {
     setLobbyTournamentSpeed(saved.lobbyTournamentSpeed && saved.lobbyTournamentSpeed in TOURNAMENT_SPEEDS ? saved.lobbyTournamentSpeed : saved.tournamentSpeed && saved.tournamentSpeed in TOURNAMENT_SPEEDS ? saved.tournamentSpeed : "turbo");
     setLobbySize(saved.lobbySize);
     setLobbyMtt(saved.lobbyMtt ?? false);
+    setLobbyBounty(saved.lobbyBounty === true);
     setMtt(isMttField(saved.mtt) ? restoreMttField(saved.mtt) : null);
     setMttSessions(isMttField(saved.mtt) && Array.isArray(saved.mttSessions) && saved.mttSessions.length === MTT_ENTRIES ? saved.mttSessions : null);
     setMttNotes(isMttField(saved.mtt) ? restoreMttNotes(saved.mttNotes) : {});
@@ -2382,6 +2403,11 @@ export default function Home() {
     const result = allInEvDelta(game);
     const decisions = coachReviews.filter(review => review.id.startsWith(`${handKey}-`));
     const record = buildHandRecord(game, decisions, gameMode);
+    const entry = careerRef.current.transactions.find(tx => tx.id === `tournament:${game.tableId}:entry`);
+    if (gameMode === "tournament" && entry?.bounty) {
+      const events = bountyEvents(game, game.tableId, `hand-${game.handNo}`, game.mttSeatIds ?? game.players.map((_, seat) => seat), Math.round(-entry.amount * 10));
+      record.potSummary.push(...events.map(event => `賞金 · ${event.eliminated === 0 ? "你" : `AI ${event.eliminated}`} 出局 · ${event.recipients.map(recipient => `${recipient.id === 0 ? "你" : `AI ${recipient.id}`} +${fmt(recipient.cents / 100)} C`).join("、")}`));
+    }
     setHandHistory(previous => [record, ...previous.filter(hand => hand.id !== record.id)].slice(0, 100));
     setProfitHistory(previous => {
       const last = previous[previous.length - 1];
@@ -2446,6 +2472,7 @@ export default function Home() {
       lobbyAofBb,
       lobbySize,
       lobbyMtt,
+      lobbyBounty,
       mtt: mtt ?? undefined,
       mttSessions: mttSessions ?? undefined,
       mttNotes,
@@ -2509,7 +2536,7 @@ export default function Home() {
     const onPageHide = () => { window.clearTimeout(timer); void flush(true); };
     window.addEventListener("pagehide", onPageHide);
     return () => { window.clearTimeout(timer); window.removeEventListener("pagehide", onPageHide); };
-  }, [restoreReady, persistenceReady, game, started, hasActiveTable, gameMode, lobbyGameMode, tournamentSpeed, lobbyTournamentSpeed, career, lobbyCashBb, lobbyTournamentEntry, lobbyAofBb, lobbySize, lobbyMtt, mtt, mttSessions, mttNotes, tournamentClock, difficulty, sessions, opponentProfiles, coachReviews, profitHistory, handHistory, studyMode, handFilter, aof, aofOpen, saveConflict]);
+  }, [restoreReady, persistenceReady, game, started, hasActiveTable, gameMode, lobbyGameMode, tournamentSpeed, lobbyTournamentSpeed, career, lobbyCashBb, lobbyTournamentEntry, lobbyAofBb, lobbySize, lobbyMtt, lobbyBounty, mtt, mttSessions, mttNotes, tournamentClock, difficulty, sessions, opponentProfiles, coachReviews, profitHistory, handHistory, studyMode, handFilter, aof, aofOpen, saveConflict]);
 
   const heroHand = useMemo(() => game.board.length >= 3 ? HAND_LABEL[bestScore([...hero.hole, ...game.board])[0]] : "", [hero.hole, game.board]);
   const isTournament = gameMode === "tournament";
@@ -2578,10 +2605,22 @@ export default function Home() {
 
   useEffect(() => {
     if (!restoreReady || !persistenceReady || !game.finished) return;
-    const wallet = careerRef.current;
+    let wallet = careerRef.current;
+    if (gameMode === "cash" && wallet.cash?.id === game.tableId && badBeatResult(game)) {
+      const paid = creditReward(wallet, "cash", game.tableId, `hand-${game.handNo}`, "bad-beat", 100 * wallet.cash.bb);
+      if (paid && paid !== wallet) { wallet = paid; commitCareer(wallet); }
+    }
     if (gameMode === "cash" && matchOver && wallet.cash?.id === game.tableId) {
       const closed = closeCash(wallet, game.tableId, game.players[0].stack);
       if (closed) commitCareer(closed);
+    }
+    if (gameMode === "tournament" && wallet.tournament?.id === game.tableId && wallet.tournament.bounty) {
+      const events = mtt ? mtt.bounty?.events ?? [] : bountyEvents(game, game.tableId, `hand-${game.handNo}`, game.players.map((_, seat) => seat), Math.round(wallet.tournament.entry * 10));
+      for (const event of events) {
+        const heroShare = event.recipients.find(recipient => recipient.id === 0)?.cents ?? 0;
+        if (heroShare > 0) wallet = creditReward(wallet, "tournament", game.tableId, event.id, "bounty", heroShare / 100) ?? wallet;
+      }
+      if (wallet !== careerRef.current) commitCareer(wallet);
     }
     if (gameMode === "tournament" && wallet.tournament?.id === game.tableId && (mtt ? mtt.heroPlace !== null || mttRemaining(mtt) <= 1 : game.players[0].stack <= 0 || playersAbleToContinue <= 1)) {
       if (mtt && mtt.handNo <= game.handNo) return;
@@ -2629,6 +2668,9 @@ export default function Home() {
         return;
       }
       wallet = paid;
+    }
+    if (wallet.aof && next.game.finished && badBeatResult(next.game)) {
+      wallet = creditReward(wallet, "aof", wallet.aof.id, `hand-${next.game.handNo}`, "bad-beat", 100 * wallet.aof.bb) ?? wallet;
     }
     if (next.runFinished && wallet.aof && !newRun) wallet = closeAof(wallet, wallet.aof.id, next.game.players[0].stack) ?? wallet;
     if (wallet !== careerRef.current) commitCareer(wallet);
@@ -2714,7 +2756,7 @@ export default function Home() {
     }
     if (wallet.tournament?.id === game.tableId) { setBankrollMessage("目前錦標賽仍未結束；請先完成賽事。"); return; }
     const id = crypto.randomUUID();
-    const opened = tournament ? openTournament(wallet, id, lobbyTournamentEntry, fieldSize) : openCash(wallet, id, lobbyCashBb);
+    const opened = tournament ? openTournament(wallet, id, lobbyTournamentEntry, fieldSize, lobbyBounty) : openCash(wallet, id, lobbyCashBb);
     if (!opened) { setBankrollMessage(`Bankroll 不足支付 ${tournament ? lobbyTournamentEntry : lobbyCashBb * 100} C 買入；請揀較低級別。`); return; }
     commitCareer(opened);
     setBankrollMessage("");
@@ -2723,7 +2765,7 @@ export default function Home() {
     const stacks = Array(seats).fill(tournament ? TOURNAMENT_SPEEDS[lobbyTournamentSpeed].startingStack : 100);
     const firstHand = { ...newHand(stacks, 0, 1, Math.random, Array(seats).fill(tournament ? MAX_REBUYS : 0), id, 0, blinds.small, blinds.big, 0, tournament ? [] : undefined), allowRunouts: !tournament };
     setGame(tournament && lobbyMtt ? { ...firstHand, mttSeatIds: Array.from({ length: 8 }, (_, index) => index) } : firstHand);
-    setMtt(tournament && lobbyMtt ? newMttField(TOURNAMENT_SPEEDS[lobbyTournamentSpeed].startingStack) : null);
+    setMtt(tournament && lobbyMtt ? { ...newMttField(TOURNAMENT_SPEEDS[lobbyTournamentSpeed].startingStack), ...(lobbyBounty ? { bounty: { sessionId: id, cents: Math.round(lobbyTournamentEntry * 10), events: [] } } : {}) } : null);
     setClockNow(Date.now());
     setMttHighlightsOpen(false);
     setMttSessions(tournament && lobbyMtt ? Array.from({ length: MTT_ENTRIES }, () => emptySessionStats()) : null);
@@ -2921,7 +2963,7 @@ export default function Home() {
       commitCareer(closed); aofRef.current = ended; setAof(ended);
       setBankrollMessage(`已兌回 ${fmt(current.game.players[0].stack * (career.aof?.bb ?? lobbyAofBb))} C 至 Bankroll。`);
     };
-    return <AofTable squeezeEnabled={riverSqueeze} onToggleSqueeze={toggleRiverSqueeze} state={aof} onChange={applyAofState} onExit={() => { setAofOpen(false); setEntryView("home"); }} onCashOut={cashOutAof} saveStatus={saveStatusLabel} careerBalance={career.balance} careerStake={firstLife ? -firstLife.amount / 8 : lobbyAofBb} bankrollMessage={bankrollMessage} legacy={!firstLife} runInvested={runInvested} runReturned={runReturned} walletOpen={walletOpen} />;
+    return <AofTable jackpotAmount={career.transactions.find(tx => tx.id === `aof:${aof.game.tableId}:${aof.runNo ?? 1}:bad-beat:hand-${aof.game.handNo}`)?.amount ?? 0} squeezeEnabled={riverSqueeze} onToggleSqueeze={toggleRiverSqueeze} state={aof} onChange={applyAofState} onExit={() => { setAofOpen(false); setEntryView("home"); }} onCashOut={cashOutAof} saveStatus={saveStatusLabel} careerBalance={career.balance} careerStake={firstLife ? -firstLife.amount / 8 : lobbyAofBb} bankrollMessage={bankrollMessage} legacy={!firstLife} runInvested={runInvested} runReturned={runReturned} walletOpen={walletOpen} />;
   }
 
   if (entryView === "home") return <><main className="mode-home-shell"><section className="mode-home" aria-labelledby="mode-home-title">
@@ -2960,10 +3002,11 @@ export default function Home() {
           {aof && <button onClick={enterAof}>{aof.runFinished ? "查看 AOF Run" : "繼續 AOF Run"}</button>}
         </div>}
         {game.finished && matchOver && handHistory.length > 0 && <p className="career-home-finished">上一張{gameMode === "tournament" ? "錦標賽" : " Cash Game"}已結束並結算。<button onClick={() => openHandReview()}>查看最近一手</button></p>}
-        <details className="career-home-ledger"><summary>最近資金記錄 <span>{career.transactions.length} 筆</span></summary><div className="career-ledger">{career.transactions.slice(-4).reverse().map(tx => <span key={tx.id}>{tx.mode.toUpperCase()} · {({ "buy-in": "買入", rebuy: "補碼", "cash-out": "兌回", entry: "報名", prize: "獎金", life: "補命" } as Record<typeof tx.kind, string>)[tx.kind]} <strong>{tx.amount >= 0 ? "+" : ""}{fmt(tx.amount)} C</strong></span>)}{career.transactions.length === 0 && <small>尚未有交易；舊版對局不追溯入帳。</small>}</div></details>
+        <details className="career-home-ledger"><summary>最近資金記錄 <span>{career.transactions.length} 筆</span></summary><div className="career-ledger">{career.transactions.slice(-4).reverse().map(tx => <span key={tx.id}>{tx.mode.toUpperCase()} · {({ "buy-in": "買入", rebuy: "補碼", "cash-out": "兌回", entry: "報名", prize: "獎金", life: "補命", "bad-beat": "壞運大獎", bounty: "人頭賞金" } as Record<typeof tx.kind, string>)[tx.kind]} <strong>{tx.amount >= 0 ? "+" : ""}{fmt(tx.amount)} C</strong></span>)}{career.transactions.length === 0 && <small>尚未有交易；舊版對局不追溯入帳。</small>}</div></details>
       </section>
       {setupMode !== "aof" && <>
       <div className="lobby-brand"><div className="brand-mark">♠</div><div><span>100BB TRAINING TABLE</span><h2>開一張新牌桌</h2><p>揀總玩家人數及 AI 難度，再開始第一手。</p></div></div>
+      {lobbyGameMode === "tournament" && <div className="lobby-section mtt-selection"><div className="lobby-label"><span>賞金</span><div><b>賽事類型</b><small>固定賞金由遊戲提供，不額外收費或減少名次獎池</small></div></div><div className="mtt-choice" role="group" aria-label="賽事類型"><button className={!lobbyBounty ? "selected" : ""} aria-pressed={!lobbyBounty} onClick={() => setLobbyBounty(false)}><b>一般賽</b></button><button className={lobbyBounty ? "selected" : ""} aria-pressed={lobbyBounty} onClick={() => setLobbyBounty(true)}><b>固定賞金賽</b><small>每人 {fmt(lobbyTournamentEntry * .1)} C</small></button></div></div>}
       {lobbyGameMode === "tournament" && <div className="lobby-section mtt-selection"><div className="lobby-label"><span>賽制</span><div><b>選擇錦標賽規模</b><small>多桌賽每張桌最多八人，破桌只喺兩手之間進行</small></div></div><div className="mtt-choice" role="group" aria-label="錦標賽規模"><button className={!lobbyMtt ? "selected" : ""} aria-pressed={!lobbyMtt} onClick={() => setLobbyMtt(false)}><b>單桌</b><small>2–8 人 · 快速決勝</small></button><button className={lobbyMtt ? "selected" : ""} aria-pressed={lobbyMtt} onClick={() => setLobbyMtt(true)}><b>200 人多桌賽</b><small>25 桌 · 前 30 名有獎</small></button></div></div>}
       <div className="lobby-section">
         <div className="lobby-label"><span>01</span><div><b>{lobbyGameMode === "tournament" && lobbyMtt ? "你的牌桌" : "總玩家人數"}</b><small>{lobbyGameMode === "tournament" && lobbyMtt ? "200 人賽固定八人桌" : "包括你在內"}</small></div><strong>{lobbyGameMode === "tournament" && lobbyMtt ? "8-MAX" : `${lobbySize}-MAX`}</strong></div>
@@ -2980,11 +3023,13 @@ export default function Home() {
       {lobbyGameMode === "tournament" && <div className="lobby-section tournament-speed-section"><div className="lobby-label"><span>03</span><div><b>錦標賽速度</b><small>只有開新賽事先會套用</small></div></div><div className="tournament-speed-grid" role="group" aria-label="錦標賽升盲速度">
         {(Object.keys(TOURNAMENT_SPEEDS) as TournamentSpeed[]).map(speed => <button type="button" key={speed} className={lobbyTournamentSpeed === speed ? "selected" : ""} aria-pressed={lobbyTournamentSpeed === speed} onClick={() => setLobbyTournamentSpeed(speed)}><b>{TOURNAMENT_SPEEDS[speed].label}</b><span>{TOURNAMENT_SPEEDS[speed].startingStack} 籌碼</span><small>{lobbyMtt ? `${Math.round(MTT_LEVEL_MS[speed] / 60000)} 分鐘升盲` : `每 ${TOURNAMENT_SPEEDS[speed].handsPerLevel} 手升盲`}</small></button>)}
       </div></div>}
+      {lobbyGameMode === "cash" && <p className="tournament-lobby-note"><b>壞運大獎 · {fmt(lobbyCashBb * 100)} C</b><span>攤牌時你以四條或更強牌輸掉有資格爭奪嘅底池即可獲獎。每手最多一次；遊戲提供，毋須額外費用。</span></p>}
       <div className="lobby-section career-stakes"><div className="lobby-label"><span>{lobbyGameMode === "tournament" ? "04" : "03"}</span><div><b>{lobbyGameMode === "tournament" ? "報名費" : "Cash 盲注級別"}</b><small>{lobbyGameMode === "tournament" ? `入場扣款；獎池由${lobbyMtt ? "全場 200 人" : "全桌"}報名費組成` : "每次買入固定 100BB；補碼另扣款"}</small></div></div><div className="career-stake-grid" role="group" aria-label="選擇級別">{lobbyGameMode === "tournament" ? TOURNAMENT_ENTRIES.map(entry => <button key={entry} className={lobbyTournamentEntry === entry ? "selected" : ""} aria-pressed={lobbyTournamentEntry === entry} onClick={() => setLobbyTournamentEntry(entry)}>{entry} C<small>獎池 {entry * (lobbyMtt ? MTT_ENTRIES : lobbySize)} C</small></button>) : CASH_BIG_BLINDS.map(bb => <button key={bb} className={lobbyCashBb === bb ? "selected" : ""} aria-pressed={lobbyCashBb === bb} onClick={() => setLobbyCashBb(bb)}>{fmt(bb / 2)} / {bb}<small>買入 {bb * 100} C</small></button>)}</div><div className={`career-risk ${standardRisk.level}`} role="status" aria-live="polite"><div><b>{standardRisk.level === "comfortable" ? "資金充足" : standardRisk.level === "caution" ? "資金風險較高" : "資金不足"}</b><span>目前可支付 {standardRisk.affordableEntries} 次{lobbyGameMode === "cash" ? " 100BB 買入" : "報名"}</span></div><p>今次先扣 <strong>{fmt(standardRisk.initialCost)} C</strong>{lobbyGameMode === "cash" && <> · 連兩次 Re-buy 最多 <strong>{fmt(standardRisk.maximumCost)} C</strong></>}</p><small>{riskDescription(standardRisk, lobbyGameMode)}{cashStartingBalance !== career.balance && " 已計入完手後可兌回嘅 Cash 桌上籌碼。"}</small></div></div>
       </>}
       {setupMode === "aof" && <div className="lobby-brand"><div className="brand-mark">♦</div><div><span>ALL-IN OR FOLD</span><h2>AOF Run 設定</h2><p>揀盲注級別，然後開始新 Run 或繼續目前進度。</p></div></div>}
       {setupMode === "aof" && <>
       <div className="lobby-section"><div className="lobby-label"><span>AOF</span><div><b>選擇玩法</b><small>開始新牌桌時生效；目前進度可繼續</small></div></div><div className="mtt-choice" role="group" aria-label="選擇 AOF 玩法"><button type="button" className={lobbyAofVariant === "run" ? "selected" : ""} aria-pressed={lobbyAofVariant === "run"} onClick={() => setLobbyAofVariant("run")}><b>三命 Run</b><small>保留 Boss 挑戰及三條命</small></button><button type="button" className={lobbyAofVariant === "standard" ? "selected" : ""} aria-pressed={lobbyAofVariant === "standard"} onClick={() => setLobbyAofVariant("standard")}><b>標準 AOF</b><small>8BB 買入 · 爆倉後可再買入</small></button></div></div>
+      <p className="tournament-lobby-note"><b>壞運大獎 · {fmt(lobbyAofBb * 100)} C</b><span>攤牌時你以四條或更強牌輸掉有資格爭奪嘅底池即可獲獎。每手最多一次；遊戲提供，毋須額外費用。</span></p>
       <div className="lobby-section career-stakes" id="aof-stakes"><div className="lobby-label"><span>AOF</span><div><b>AOF 盲注級別</b><small>{lobbyAofVariant === "standard" ? "8BB 一次買入；爆倉後可重新買入" : "8BB 一條命；只喺爆倉補命時再扣款"}</small></div></div><div className="career-stake-grid" role="group" aria-label="AOF 級別">{AOF_BIG_BLINDS.map(bb => <button key={bb} className={lobbyAofBb === bb ? "selected" : ""} aria-pressed={lobbyAofBb === bb} onClick={() => setLobbyAofBb(bb)}>{fmt(bb / 2)} / {bb}<small>{lobbyAofVariant === "standard" ? "每次買入" : "每條命"} {bb * 8} C</small></button>)}</div><div className={`career-risk ${aofRisk.level}`} role="status" aria-live="polite"><div><b>{aofRisk.level === "comfortable" ? "資金充足" : aofRisk.level === "caution" ? "資金風險較高" : "資金不足"}</b><span>{lobbyAofVariant === "standard" ? `可支付 ${aofRisk.affordableEntries} 次買入` : `可支付 ${aofRisk.affordableEntries} 條命 · 完整三命 ${Math.floor(aofStartingBalance / aofRisk.maximumCost)} 次`}</span></div><p>開局先扣 <strong>{fmt(aofRisk.initialCost)} C</strong>{lobbyAofVariant === "run" && <> · 三命最多 <strong>{fmt(aofRisk.maximumCost)} C</strong></>}</p><small>{lobbyAofVariant === "standard" ? "每次重新買入先扣 8BB；離桌時兌回剩餘籌碼。" : riskDescription(aofRisk, "aof")}{aofStartingBalance !== career.balance && " 開新 Run 時先兌回目前桌上籌碼。"}</small></div><button className="career-aof-launch" disabled={!!aof && (!aof.game.finished || aofPresentation(aof).revealing)} onClick={startNewAof}>{aof ? `以所選級別開始新${lobbyAofVariant === "standard" ? "標準 AOF" : "三命 Run"}` : `開始${lobbyAofVariant === "standard" ? "標準 AOF" : "三命 Run"}`}</button>{aof && <button className="resume-table" onClick={enterAof}>繼續目前 AOF Run{career.aof ? ` · BB ${career.aof.bb} C` : ""}</button>}</div>
       </>}
       {setupMode !== "aof" && <>
@@ -3015,7 +3060,9 @@ export default function Home() {
       <button className={gameMode === "tournament" ? "selected" : ""} onClick={() => openModeLobby("tournament")}><b>錦標賽</b><small>升盲</small></button>
       <button onClick={() => chooseMode("aof")}><b>AOF</b><small>娛樂模式</small></button>
     </div>
-    <div className="career-strip"><b>Bankroll {fmt(career.balance)} C</b><span>{isTournament ? tournamentEntry ? `報名 ${tournamentEntry} C · 獎池 ${tournamentPrizePool} C` : "舊版練習賽事" : career.transactions.some(tx => tx.id === `cash:${game.tableId}:buy-in`) ? `Cash BB ${cashStake} C · 100BB 買入 ${cashStake * 100} C` : "舊版練習桌"}</span></div>{bankrollMessage && <p className="bankroll-message" role="alert">{bankrollMessage}</p>}{saveStatus === "error" && <p className="bankroll-message" role="alert">{saveFailure || "本機同步失敗，請檢查網絡。"}</p>}
+    {isTournament && career.transactions.find(tx => tx.id === `tournament:${game.tableId}:entry`)?.bounty && <div className="career-strip"><b>固定賞金目標</b><span>每位玩家 {fmt(tournamentEntry * .1)} C · 淘汰後分配</span></div>}
+    {isTournament && game.finished && !standardCinematic && career.transactions.find(tx => tx.id === `tournament:${game.tableId}:entry`)?.bounty && bountyEvents(game, game.tableId, `hand-${game.handNo}`, game.mttSeatIds ?? game.players.map((_, seat) => seat), Math.round(tournamentEntry * 10)).map(event => <p className="bankroll-message" role="status" key={event.id}>賞金 · {event.eliminated === 0 ? "你" : `AI ${event.eliminated}`} 出局 · {event.recipients.map(recipient => `${recipient.id === 0 ? "你" : `AI ${recipient.id}`} +${fmt(recipient.cents / 100)} C`).join("、")}</p>)}
+    <div className="career-strip"><b>Bankroll {fmt(career.balance)} C</b><span>{isTournament ? tournamentEntry ? `${career.tournament?.bounty ? "固定賞金賽 · " : ""}報名 ${tournamentEntry} C · 獎池 ${tournamentPrizePool} C` : "舊版練習賽事" : career.transactions.some(tx => tx.id === `cash:${game.tableId}:buy-in`) ? `Cash BB ${cashStake} C · 100BB 買入 ${cashStake * 100} C` : "舊版練習桌"}</span></div>{game.finished && !standardCinematic && career.transactions.filter(tx => tx.id === `cash:${game.tableId}:bad-beat:hand-${game.handNo}`).map(tx => { const result = badBeatResult(game); return result && <p className="bankroll-message" role="status" key={tx.id}>壞運大獎 +{fmt(tx.amount)} C · 第 {result.run + 1} 次牌面：{result.board.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</p>; })}{bankrollMessage && <p className="bankroll-message" role="alert">{bankrollMessage}</p>}{saveStatus === "error" && <p className="bankroll-message" role="alert">{saveFailure || "本機同步失敗，請檢查網絡。"}</p>}
     <header className="topbar">
       <div><div className="brand-mark">{tableSize}</div><div><h1>{tableSize}-MAX</h1><p>{isTournament ? `TOURNAMENT · LEVEL ${blindLevel}` : "CASH GAME · 100BB"}</p></div></div>
       <div className="table-options">
@@ -3063,7 +3110,7 @@ export default function Home() {
             <button className="preset-allin" disabled={!canRaise || game.turn !== 0} onClick={() => preset("allin")}>All-in</button>
           </div><div className="raise-input-row"><input aria-label="加注額滑桿" type="range" min={minTo} max={Math.max(minTo, maxTo)} step="0.5" value={effectiveRaiseTo} disabled={!canRaise || game.turn !== 0} onChange={event => setRaiseTo(Number(event.target.value))} /><label>至 <input aria-label="輸入下注總額" type="number" inputMode="decimal" min={minTo} max={maxTo} step="0.5" value={raiseDraft ?? String(selectedRaiseTo)} disabled={!canRaise || game.turn !== 0} onFocus={() => setRaiseDraft(String(selectedRaiseTo))} onChange={event => setRaiseDraft(event.target.value)} onBlur={() => { const value = Number(raiseDraft); if (raiseDraft?.trim() && Number.isFinite(value)) setRaiseTo(raiseAmount(value, minTo, maxTo)); setRaiseDraft(null); }} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label></div><small className="raise-cost">今次投入 {fmt(Math.max(0, selectedRaiseTo - hero.streetBet))} {isTournament ? "籌碼" : "BB"} · 合法範圍 {fmt(minTo)}–{fmt(maxTo)}{!canRaise && toCall > 0 && maxTo > game.currentBet ? " · 短碼全押未重新開放加注" : ""}</small></div>
           <button className="action primary" disabled={!canRaise || game.turn !== 0} onClick={() => { const target = selectedRaiseTo; if (target >= maxTo && !window.confirm(`確認 All-in？今次投入 ${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}。`)) return; heroAction("raise", target); }}>{game.currentBet === 0 ? "下注" : "加注至"} {fmt(selectedRaiseTo)}</button>
-        </div>{visibleHint && <div className="gto-hint" aria-live="polite"><div className="hint-icon">✦</div><div className="hint-copy"><span>GTO COPILOT · 只用公開資訊</span><h3>{visibleHint.title}</h3><div className="hint-action-line"><strong>{visibleHint.action}</strong>{visibleHint.size && <b>{visibleHint.size}</b>}</div><p>{visibleHint.detail}</p><div className="hint-metrics">{visibleHint.metrics.map(metric => <i key={metric}>{metric}</i>)}</div></div><button className="hint-close" aria-label="關閉提示" onClick={() => setHint(null)}>×</button></div>}</> : <><div className="result-panel"><div className="result-copy"><span>{matchOver ? isTournament ? mtt && mttRemaining(mtt) > 1 ? "你已出局" : "錦標賽結束" : "牌桌結束" : "本手結束"}</span><strong>{game.message}</strong>{game.potSummary.map(line => <small key={line}>{line}</small>)}{autoNextHand && <small className="rebuy-notice">{quickFold && gameMode === "cash" ? "↻ 快速棄牌 · 結算後開下一手" : "↻ 範圍自動棄牌 · 約 2 秒後開下一手"}</small>}{autoSpectate && <small className="rebuy-notice">你已出局 · 正在完成其餘名次</small>}{studyMode && <small className="study-result-note">◉ Study Mode：已揭示包括muck牌在內嘅AI底牌</small>}{pendingRebuys.length > 0 && !matchOver && <small className="rebuy-notice">↻ {pendingRebuys.map(index => PLAYER_NAMES[index]).join("、")} 下一手自動 Re-buy 100BB</small>}{heroOut && <small className="rebuy-notice out-notice">{isTournament ? `你以第 ${heroPlace ?? "—"} 名出局${matchOver ? "" : "；AI將繼續決出冠軍"}` : career.cash?.id === game.tableId && career.balance < 100 * career.cash.bb ? "Bankroll 不足補碼；本桌已結算" : "你已用盡兩次 Re-buy，籌碼清零後正式 OUT"}</small>}{revealedAi.length > 0 && <div className="result-hands" aria-label="AI 翻開的底牌">{revealedAi.map(player => <div className={`result-hand ${player.folded ? "study-mucked" : ""}`} key={player.id}><b>{player.name}{player.folded ? " · Fold" : ""}</b><div>{player.hole.map((card, index) => <CardView key={index} card={card} mini />)}</div></div>)}</div>}{game.runoutBoards && game.runoutBoards.length > 1 && <div className="runout-boards">{game.runoutBoards.map((board, index) => <div key={index}><b>第 {index + 1} 次</b><span>{board.map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}{game.street === "showdown" && game.board.length === 5 && (game.runoutBoards?.length ?? 1) === 1 && <div className={`standard-winning-five ${visibleMotion?.winners.length ? "animate" : ""}`} aria-label="勝出玩家最佳五張牌">{game.winners.map(index => <div key={index}><b>{game.players[index].name} · {HAND_LABEL[bestScore([...game.players[index].hole, ...game.board])[0]]}</b><span>{aofBestFive([...game.players[index].hole, ...game.board]).map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}</div><button onClick={nextHand} disabled={!!mtt && mtt.handNo <= game.handNo}>{mtt && mtt.handNo <= game.handNo ? "全場結算中…" : matchOver ? "返回選桌" : pendingRebuys.includes(0) ? "Re-buy 100BB →" : "下一手 →"}</button></div>{isTournament && matchOver && <section className="tournament-final" aria-label="錦標賽最終排名"><h2>{mtt && mttRemaining(mtt) > 1 ? "目前名次 · 全場仍在進行" : "最終排名"}</h2><p>{tournamentPrizePool ? `獎池 ${tournamentPrizePool} C` : "虛擬獎勵總額 100 點"} · {TOURNAMENT_SPEEDS[tournamentSpeed].label}</p><ol>{(mtt ? mttStandings(mtt).map(entry => ({ seat: entry.id, place: entry.place })) : standings).filter(entry => !mtt || entry.place <= 30 || entry.seat === 0).map(entry => <li key={entry.seat} className={entry.seat === 0 ? "hero" : ""}><b>第 {entry.place} 名</b><span>{entry.seat === 0 ? "你" : mtt ? `AI ${entry.seat}` : PLAYER_NAMES[entry.seat]}</span><strong>{tournamentPrizePool ? `${fmt(mtt ? mttPrize(tournamentEntry, entry.place, mttStandings(mtt).map(item => item.place)) : prizeForPlace(entry.place, tableSize, standings) * tournamentPrizePool / 100)} C` : `${prizeForPlace(entry.place, tableSize, standings)} 點`}</strong></li>)}</ol></section>}</>}
+        </div>{visibleHint && <div className="gto-hint" aria-live="polite"><div className="hint-icon">✦</div><div className="hint-copy"><span>GTO COPILOT · 只用公開資訊</span><h3>{visibleHint.title}</h3><div className="hint-action-line"><strong>{visibleHint.action}</strong>{visibleHint.size && <b>{visibleHint.size}</b>}</div><p>{visibleHint.detail}</p><div className="hint-metrics">{visibleHint.metrics.map(metric => <i key={metric}>{metric}</i>)}</div></div><button className="hint-close" aria-label="關閉提示" onClick={() => setHint(null)}>×</button></div>}</> : <><div className="result-panel"><div className="result-copy"><span>{matchOver ? isTournament ? mtt && mttRemaining(mtt) > 1 ? "你已出局" : "錦標賽結束" : "牌桌結束" : "本手結束"}</span><strong>{game.message}</strong>{isTournament && career.transactions.find(tx => tx.id === `tournament:${game.tableId}:entry`)?.bounty && bountyEvents(game, game.tableId, `hand-${game.handNo}`, game.mttSeatIds ?? game.players.map((_, seat) => seat), Math.round(tournamentEntry * 10)).map(event => <small className="jackpot-result" key={event.id}>賞金 · {event.eliminated === 0 ? "你" : `AI ${event.eliminated}`} 出局 · {event.recipients.map(recipient => `${recipient.id === 0 ? "你" : `AI ${recipient.id}`} +${fmt(recipient.cents / 100)} C`).join("、")}</small>)}{!isTournament && career.transactions.filter(tx => tx.id === `cash:${game.tableId}:bad-beat:hand-${game.handNo}`).map(tx => { const result = badBeatResult(game); return result && <small className="jackpot-result" key={tx.id}>✦ 壞運大獎 +{fmt(tx.amount)} C · 第 {result.run + 1} 次牌面 {result.board.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</small>; })}{game.potSummary.map(line => <small key={line}>{line}</small>)}{autoNextHand && <small className="rebuy-notice">{quickFold && gameMode === "cash" ? "↻ 快速棄牌 · 結算後開下一手" : "↻ 範圍自動棄牌 · 約 2 秒後開下一手"}</small>}{autoSpectate && <small className="rebuy-notice">你已出局 · 正在完成其餘名次</small>}{studyMode && <small className="study-result-note">◉ Study Mode：已揭示包括muck牌在內嘅AI底牌</small>}{pendingRebuys.length > 0 && !matchOver && <small className="rebuy-notice">↻ {pendingRebuys.map(index => PLAYER_NAMES[index]).join("、")} 下一手自動 Re-buy 100BB</small>}{heroOut && <small className="rebuy-notice out-notice">{isTournament ? `你以第 ${heroPlace ?? "—"} 名出局${matchOver ? "" : "；AI將繼續決出冠軍"}` : career.cash?.id === game.tableId && career.balance < 100 * career.cash.bb ? "Bankroll 不足補碼；本桌已結算" : "你已用盡兩次 Re-buy，籌碼清零後正式 OUT"}</small>}{revealedAi.length > 0 && <div className="result-hands" aria-label="AI 翻開的底牌">{revealedAi.map(player => <div className={`result-hand ${player.folded ? "study-mucked" : ""}`} key={player.id}><b>{player.name}{player.folded ? " · Fold" : ""}</b><div>{player.hole.map((card, index) => <CardView key={index} card={card} mini />)}</div></div>)}</div>}{game.runoutBoards && game.runoutBoards.length > 1 && <div className="runout-boards">{game.runoutBoards.map((board, index) => <div key={index}><b>第 {index + 1} 次</b><span>{board.map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}{game.street === "showdown" && game.board.length === 5 && (game.runoutBoards?.length ?? 1) === 1 && <div className={`standard-winning-five ${visibleMotion?.winners.length ? "animate" : ""}`} aria-label="勝出玩家最佳五張牌">{game.winners.map(index => <div key={index}><b>{game.players[index].name} · {HAND_LABEL[bestScore([...game.players[index].hole, ...game.board])[0]]}</b><span>{aofBestFive([...game.players[index].hole, ...game.board]).map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}</div><button onClick={nextHand} disabled={!!mtt && mtt.handNo <= game.handNo}>{mtt && mtt.handNo <= game.handNo ? "全場結算中…" : matchOver ? "返回選桌" : pendingRebuys.includes(0) ? "Re-buy 100BB →" : "下一手 →"}</button></div>{isTournament && matchOver && <section className="tournament-final" aria-label="錦標賽最終排名"><h2>{mtt && mttRemaining(mtt) > 1 ? "目前名次 · 全場仍在進行" : "最終排名"}</h2><p>{tournamentPrizePool ? `獎池 ${tournamentPrizePool} C` : "虛擬獎勵總額 100 點"} · {TOURNAMENT_SPEEDS[tournamentSpeed].label}</p><ol>{(mtt ? mttStandings(mtt).map(entry => ({ seat: entry.id, place: entry.place })) : standings).filter(entry => !mtt || entry.place <= 30 || entry.seat === 0).map(entry => <li key={entry.seat} className={entry.seat === 0 ? "hero" : ""}><b>第 {entry.place} 名</b><span>{entry.seat === 0 ? "你" : mtt ? `AI ${entry.seat}` : PLAYER_NAMES[entry.seat]}</span><strong>{tournamentPrizePool ? `${fmt(mtt ? mttPrize(tournamentEntry, entry.place, mttStandings(mtt).map(item => item.place)) : prizeForPlace(entry.place, tableSize, standings) * tournamentPrizePool / 100)} C` : `${prizeForPlace(entry.place, tableSize, standings)} 點`}</strong></li>)}</ol></section>}</>}
       </div>
 
       <aside className="side-panel">

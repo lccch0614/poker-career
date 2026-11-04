@@ -1,4 +1,5 @@
 import type { Card } from "./poker-engine";
+import type { BountyEvent } from "./reward-rules";
 import { TOURNAMENT_BLINDS, type TournamentSpeed } from "./tournament";
 
 export const MTT_ENTRIES = 200;
@@ -17,6 +18,7 @@ export type MttField = {
   clock?: { elapsedMs: number; lastTickAt: number; nextBackgroundAt: number };
   tableHands?: number[]; buttons?: number[]; moved?: number[]; highlights?: MttHighlight[];
   backgroundCursor?: number;
+  bounty?: { sessionId: string; cents: number; events: BountyEvent[] };
 };
 
 export function mttPayoutShares() {
@@ -72,7 +74,14 @@ export function isMttField(value: unknown): value is MttField {
   if (!value || typeof value !== "object") return false;
   const field = value as MttField;
   const seats = field.tables?.flat();
-  return field.version === 1 && Array.isArray(field.stacks) && field.stacks.length === MTT_ENTRIES &&
+  const bounty = field.bounty;
+  const bountyValid = bounty === undefined || !!bounty && typeof bounty.sessionId === "string" && !!bounty.sessionId && Number.isSafeInteger(bounty.cents) && bounty.cents > 0 && Array.isArray(bounty.events) &&
+    new Set(bounty.events.map(event => event?.id)).size === bounty.events.length &&
+    new Set(bounty.events.map(event => event?.eliminated)).size === bounty.events.length &&
+    bounty.events.every(event => !!event && typeof event.id === "string" && event.id.startsWith(`${bounty.sessionId}:`) && Number.isInteger(event.eliminated) && event.eliminated >= 0 && event.eliminated < MTT_ENTRIES && Array.isArray(event.recipients) && event.recipients.length > 0 &&
+      new Set(event.recipients.map(recipient => recipient?.id)).size === event.recipients.length && event.recipients.every(recipient => !!recipient && Number.isInteger(recipient.id) && recipient.id >= 0 && recipient.id < MTT_ENTRIES && recipient.id !== event.eliminated && Number.isSafeInteger(recipient.cents) && recipient.cents >= 0) && event.recipients.reduce((sum, recipient) => sum + recipient.cents, 0) === bounty.cents);
+
+  return bountyValid && field.version === 1 && Array.isArray(field.stacks) && field.stacks.length === MTT_ENTRIES &&
     field.stacks.every(stack => Number.isFinite(stack) && stack >= 0) &&
     Array.isArray(field.tables) && Array.isArray(seats) && seats.every(id => Number.isInteger(id) && id >= 0 && id < MTT_ENTRIES) &&
     new Set(seats).size === seats.length && seats.length === field.stacks.filter(stack => stack > 0).length && seats.every(id => field.stacks[id] > 0) &&
