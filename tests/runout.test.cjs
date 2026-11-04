@@ -305,3 +305,51 @@ assert.ok(Math.abs(flights.reduce((sum,f) => sum+f.amount,0)-90) < 1e-9);
 const returned = awardUncontested({ ...tieBase, bb: 0, bigBlindAntePaid: 0, players: tieBase.players.map((p,i) => ({ ...p, stack: [19,18,17,20][i], totalBet: [11,2,3,0][i], folded: i !== 0 })) }, 0);
 assert.deepEqual(settlementFlights(returned.showdownAwards).map(f => [f.seat,f.amount,f.refund]), [[0,8,false],[0,8,true]]);
 assert.deepEqual(settlementFlights(undefined), []);
+// Exercise the real showdown engine, including its pot layers, before rewards.
+{
+  const {badBeatResult,bountyEvents} = require('../app/reward-rules.ts');
+  const card = (rank,suit) => ({rank,suit});
+  const board = [card(9,'s'),card(9,'h'),card(9,'d'),card(8,'s'),card(7,'s')];
+  let hand = newHand([10,10],0,51,()=>.4,undefined,'reward-test');
+  hand = {...hand,board,players:hand.players.map((p,i)=>({...p,stack:0,totalBet:10,streetBet:10,folded:false,allIn:true,hole:i ? [card(10,'s'),card(11,'s')] : [card(9,'c'),card(2,'h')]}))};
+  const settled = showdown(hand);
+  assert.equal(settled.winners[0],1);
+  assert.equal(badBeatResult(settled).winner,1);
+  assert.deepEqual(bountyEvents(settled,'reward-test','hand-51',[0,1],500)[0].recipients,[{id:1,cents:500}]);
+  assert.equal(settled.players.reduce((sum,player)=>sum+player.stack,0),20);
+}
+{
+ const {newMttField} = require('../app/mtt-field.ts');
+ const {newCareerWallet,openTournament} = require('../app/career-bankroll.ts');
+ const id = saveFixture.game.tableId;
+ const career = openTournament(newCareerWallet(),id,50,200,true);
+ const mtt = {...newMttField(100),bounty:{sessionId:id,cents:500,events:[]}};
+ assert.equal(isRecoverablePokerState({...saveFixture,career,mtt}),true);
+ assert.equal(isRecoverablePokerState({...saveFixture,career,mtt:{...mtt,bounty:{...mtt.bounty,sessionId:'other'}}}),false);
+ assert.equal(isRecoverablePokerState({...saveFixture,career,mtt:{...mtt,bounty:{...mtt.bounty,cents:501}}}),false);
+ assert.equal(isRecoverablePokerState({...saveFixture,career,mtt:{...mtt,bounty:{...mtt.bounty,events:[null]}}}),false);
+}
+{
+ const {newMttField} = require('../app/mtt-field.ts');
+ const {newCareerWallet,openTournament} = require('../app/career-bankroll.ts');
+ const career = openTournament(newCareerWallet(),saveFixture.game.tableId,50,200,true);
+ assert.equal(isRecoverablePokerState({...saveFixture,career,mtt:newMttField(100)}),false);
+ assert.equal(isRecoverablePokerState({...saveFixture,career,mtt:null}),false);
+}
+{
+ const {bountyEvents} = require('../app/reward-rules.ts');
+ const {newCareerWallet,openTournament,creditReward,settleTournament,restoreCareerWallet} = require('../app/career-bankroll.ts');
+ const c = (rank,suit)=>({rank,suit});
+ let hand = newHand([10,10],0,52,()=>.4,undefined,'championship',0,.5,1,0,[]);
+ hand = {...hand,board:[c(9,'s'),c(9,'h'),c(9,'d'),c(8,'s'),c(7,'s')],players:hand.players.map((p,i)=>({...p,stack:0,totalBet:10,streetBet:10,folded:false,allIn:true,hole:i ? [c(9,'c'),c(2,'h')] : [c(10,'s'),c(11,'s')]}))};
+ const settled = showdown(hand);
+ const events = bountyEvents(settled,'championship','hand-52',[0,1],500);
+ let wallet = openTournament(newCareerWallet(),'championship',50,2,true);
+ for (const event of events) { const share = event.recipients.find(p=>p.id===0)?.cents ?? 0; if (share) wallet = creditReward(wallet,'tournament','championship',event.id,'bounty',share/100); }
+ assert.equal(wallet.balance,2955);
+ const restored = restoreCareerWallet(JSON.parse(JSON.stringify(wallet)));
+ assert.equal(creditReward(restored,'tournament','championship',events[0].id,'bounty',5).balance,2955);
+ const finalWallet = settleTournament(restored,'championship',1);
+ assert.equal(finalWallet.balance,3055);
+ assert.deepEqual(finalWallet.transactions.map(entry=>entry.kind),['entry','bounty','prize']);
+}

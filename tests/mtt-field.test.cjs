@@ -4,10 +4,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { advanceMttField, advanceMttBackground, newHand, act };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { advanceMttField, advanceMttBackground, withMttBounties, newHand, act };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { advanceMttField, advanceMttBackground, newHand, act } = require('../app/page.tsx');
+const { advanceMttField, advanceMttBackground, withMttBounties, newHand, act } = require('../app/page.tsx');
 const { MTT_ENTRIES, completeMttRound, mttRemaining, mttPrize, mttPayoutShares, isMttField, newMttField, restoreMttField, mttLevel } = require('../app/mtt-field.ts');
 const { openTournament, newCareerWallet, settleTournament, restoreCareerWallet } = require('../app/career-bankroll.ts');
 
@@ -155,4 +155,29 @@ test('tied bubble prize enters career once at the split amount', () => {
   const paid = settleTournament(wallet, 'mtt-tie', 30, [30, 30]);
   assert.ok(Math.abs(paid.balance - wallet.balance - mttPrize(50, 30, [30, 30])) < 0.001);
   assert.equal(settleTournament(paid, 'mtt-tie', 30, [30, 30]), null);
+});
+
+
+test('bounty events survive restoration and do not duplicate on replay', () => {
+  const field = {...newMttField(100), bounty:{sessionId:'tourney', cents:500, events:[]}};
+  const game = {...newHand([10,10],0,1), finished:true, street:'preflop', startingStacks:[10,10], settledBets:[10,10], players:[{folded:false,stack:20,hole:[]},{folded:true,stack:0,hole:[]}], showdownAwards:[{run:0,layer:0,winners:[0],refund:false}]};
+  const recorded = withMttBounties(field,[game],[[0,1]]);
+  assert.equal(recorded.bounty.events.length,1);
+  assert.deepEqual(recorded.bounty.events[0].recipients,[{id:0,cents:500}]);
+  const restored = restoreMttField(JSON.parse(JSON.stringify(recorded)));
+  assert.equal(isMttField(restored),true);
+  assert.equal(withMttBounties(restored,[game],[[0,1]]).bounty.events.length,1);
+});
+
+test('full 200-player bounty field records every elimination once', () => {
+ let field = {...newMttField(100),bounty:{sessionId:'full-event',cents:500,events:[]}};
+ for (let round=0;round<300 && mttRemaining(field)>1;round++) {
+   field = {...field,clock:{...field.clock,elapsedMs:Math.floor(round/8)*180000,lastTickAt:Date.now()}};
+   field = advanceMttField(field,'turbo');
+   assert.ok(isMttField(structuredClone(field)));
+   assert.equal(field.bounty.events.length,field.finishes.length);
+ }
+ assert.equal(mttRemaining(field),1);
+ assert.equal(field.bounty.events.length,199);
+ assert.equal(new Set(field.bounty.events.map(event=>event.eliminated)).size,199);
 });
