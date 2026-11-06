@@ -11,11 +11,12 @@ import { RANGE_POSITIONS, RANGE_RANKS, handsForPosition, positionRangePresets, r
 import { emptyHandTracker, emptySessionStats, settlePlayerSession, statPercent, trackPreflopAction, restoreOpponentProfiles, restoreMttNotes, recordOpponentProfile, updateOpponentNote, type OpponentProfile, type PlayerHandTracker, type PlayerSessionStats } from "./session-stats";
 import { TOURNAMENT_BLINDS, TOURNAMENT_SPEEDS, handsUntilBlindUp, payoutShares, potsWithBigBlindAnte, prizeForPlace, recordTournamentFinishes, tournamentBigBlindAnte, tournamentBlinds, tournamentCanContinue, tournamentLevel, tournamentPhase, tournamentStandings, type TournamentFinish, type TournamentSpeed } from "./tournament";
 import { AOF_BIG_BLINDS, CASH_BIG_BLINDS, TOURNAMENT_ENTRIES, aofContinuationStake, buyAofLife, careerStakeRisk, cashCannotRebuy, closeAof, closeCash, creditReward, newCareerWallet, openAof, openCash, openTournament, rebuyCash, restoreCareerWallet, settleTournament, type CareerWallet, type CareerStakeRisk } from "./career-bankroll";
+import { careerProgress } from "./career-progress";
 import { badBeatResult, bountyEvents } from "./reward-rules";
 import { MTT_BACKGROUND_INTERVAL_MS, MTT_ENTRIES, MTT_LEVEL_MS, MTT_PAID, completeMttBatch, completeMttRound, isMttField, mttAverage, mttClockTick, mttElapsed, mttLevel, mttPayoutShares, mttPrize, mttRemaining, mttStandings, newMttField, rebalanceMttField, restoreMttField, type MttField, type MttHighlight } from "./mtt-field";
 import { extendDecisionClock, newDecisionClock, pauseDecisionClock, restoreDecisionClock, tickDecisionClock, type TournamentDecisionClock } from "./tournament-clock";
 import { saveKeepalive } from "./save-transport";
-import { pokerStateFetch, readSaveBackup, decodeSaveBackup, importSaveState, storageKey } from "./browser-storage";
+import { pokerStateFetch, readSaveBackup, decodeSaveBackup, importSaveState, resetSaveState, storageKey } from "./browser-storage";
 
 type Street = "preflop" | "flop" | "turn" | "river" | "showdown";
 type Difficulty = "casual" | "hard" | "pro";
@@ -2093,7 +2094,7 @@ export default function Home() {
   const careerRef = useRef<CareerWallet>(career);
   const aofRef = useRef<AofState | null>(aof);
   const [lobbyCashBb, setLobbyCashBb] = useState(1);
-  const [lobbyTournamentEntry, setLobbyTournamentEntry] = useState(50);
+  const [lobbyTournamentEntry, setLobbyTournamentEntry] = useState(20);
   const [lobbyAofBb, setLobbyAofBb] = useState(1);
   const [lobbyAofVariant, setLobbyAofVariant] = useState<"run" | "standard">("run");
   const [bankrollMessage, setBankrollMessage] = useState("");
@@ -2252,14 +2253,14 @@ export default function Home() {
         const details = await response.json().catch(() => ({})) as { error?: string };
         throw new Error(details.error === "Browser save is unavailable or damaged" ? "瀏覽器存檔無法讀取或已損壞。" : details.error || "讀取存檔失敗");
       })
-      .then((payload: { state?: unknown; updatedAt?: number | null; cacheOwner?: string }) => {
+      .then((payload: { state?: unknown; updatedAt?: number | null; cacheOwner?: string; reset?: boolean }) => {
         if (!active) return false;
         saveRevision.current = payload.updatedAt ?? 0;
         cacheOwner.current = typeof payload.cacheOwner === "string" ? payload.cacheOwner : null;
         let localCandidate: SavedPokerState | null = null;
         try {
           const local = cacheOwner.current && window.localStorage.getItem(`poker-local-save:${cacheOwner.current}`);
-          if (local) { const candidate: unknown = JSON.parse(local); if (isRecoverablePokerState(candidate)) localCandidate = candidate; }
+          if (local && !payload.reset) { const candidate: unknown = JSON.parse(local); if (isRecoverablePokerState(candidate)) localCandidate = candidate; }
         } catch { /* Keep the cloud version when browser storage is unavailable. */ }
         if (isRecoverablePokerState(payload.state)) {
           if (localCandidate && localCandidate.savedAt > payload.state.savedAt + 1000) {
@@ -2748,6 +2749,9 @@ export default function Home() {
 
   function startTable() {
     const tournament = lobbyGameMode === "tournament";
+    const progress = careerProgress(careerRef.current);
+    if (tournament && (!progress.stakes("tournament", TOURNAMENT_ENTRIES)[TOURNAMENT_ENTRIES.indexOf(lobbyTournamentEntry as typeof TOURNAMENT_ENTRIES[number])] || lobbyBounty && !progress.bounty)) { setBankrollMessage("呢個賽事尚未解鎖，請選擇已開放項目。"); return; }
+    if (!tournament && !progress.stakes("cash", CASH_BIG_BLINDS)[CASH_BIG_BLINDS.indexOf(lobbyCashBb as typeof CASH_BIG_BLINDS[number])]) { setBankrollMessage("呢個級別尚未解鎖。"); return; }
     const fieldSize = tournament && lobbyMtt ? MTT_ENTRIES : lobbySize;
     let wallet = careerRef.current;
     if (wallet.cash?.id === game.tableId) {
@@ -2922,6 +2926,16 @@ export default function Home() {
       window.alert(`未能匯入備份：${error instanceof Error ? error.message : "檔案無效或瀏覽器儲存空間不足"}。原有存檔已保留。`);
     }
   };
+  const resetCareer = async () => {
+    try {
+      if (saveInFlight.current || pendingSave.current) throw new Error("請等目前進度儲存完成後再重設。");
+      const expected = readSaveBackup();
+      if (!window.confirm("重設會清除目前生涯、資金、進行中牌局、成就及牌局紀錄，並由 3,000 C 重新開始。原存檔會保存在本機，可用「下載匯入前存檔」備份。請先關閉其他遊戲分頁。確定重設？")) return;
+      if (saveInFlight.current || pendingSave.current) throw new Error("目前進度仍在儲存，請稍後再試。");
+      await resetSaveState(expected);
+      window.location.reload();
+    } catch (error) { window.alert(`未能重設：${error instanceof Error ? error.message : "請檢查瀏覽器儲存空間"}。原有存檔已保留。`); }
+  };
   const backupControls = <div className="backup-controls"><button type="button" onClick={downloadRawSave}>下載存檔備份</button><button type="button" onClick={downloadBeforeImport}>下載匯入前存檔</button><label>匯入存檔備份<input type="file" accept="application/json,.json" onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; void importBackup(file); }} /></label></div>;
 
   if (!restoreReady) return <main className="restore-shell"><div className="restore-card"><span>♠</span><b>正在恢復牌局</b><small>載入籌碼、Session統計及最近手牌…</small></div></main>;
@@ -2937,6 +2951,7 @@ export default function Home() {
     setBankrollMessage(""); setEntryView("table"); setAofOpen(true);
   };
   const startNewAof = () => {
+    if (!careerProgress(careerRef.current).stakes("aof", AOF_BIG_BLINDS)[AOF_BIG_BLINDS.indexOf(lobbyAofBb as typeof AOF_BIG_BLINDS[number])]) { setBankrollMessage("呢個 AOF 級別尚未解鎖。"); return; }
     if (!aof) { enterAof(); return; }
     const previous = aof;
     if (!previous.game.finished || aofPresentation(previous).revealing) { setBankrollMessage("請先完成目前牌局及揭牌，再開始新 Run。"); return; }
@@ -2971,14 +2986,9 @@ export default function Home() {
     <div className="mode-home-wallet"><div><span>可用 Bankroll</span><strong>{fmt(career.balance)} <small>C</small></strong></div><span className={`save-indicator ${saveStatus}`}>● {saveStatusLabel}</span></div>
     {saveStatus === "error" && <p className="bankroll-message" role="alert">{saveFailure || "本機同步失敗，請檢查網絡。"}</p>}
     {(activeStandardTable || aof) && <section className="mode-home-continue" aria-label="繼續牌局"><h2>繼續上次牌局</h2><div>{activeStandardTable && <button onClick={() => { setEntryView("table"); setStarted(true); }}><span>{gameMode === "tournament" ? `錦標賽 · ${mtt ? "200 人" : `${tableSize} 人`}` : `Cash Game · ${tableSize} 人`}<small>第 {game.handNo} 手 · {fmt(hero.stack)}{gameMode === "tournament" ? " 籌碼" : " BB"}</small></span><span>繼續 →</span></button>}{aof && <button onClick={enterAof}>AOF · {aof.runFinished ? "查看結果" : "目前 Run"}<span>繼續 →</span></button>}</div></section>}
-    <section className="career-milestones" aria-label="職涯挑戰"><h2>職涯挑戰與里程碑</h2><p>以本機職涯交易記錄計算；完成後保留成就。</p>{[
-      { title: "踏上牌桌", value: career.transactions.filter(tx => tx.kind === "buy-in").length, goal: 1, unit: "次 Cash 買入" },
-      { title: "賽場常客", value: career.transactions.filter(tx => tx.kind === "entry").length, goal: 3, unit: "場錦標賽" },
-      { title: "首次獲獎", value: career.transactions.filter(tx => tx.kind === "prize" && tx.amount > 0).length, goal: 1, unit: "次錦標賽獎金" },
-      { title: "AOF 挑戰者", value: career.transactions.filter(tx => tx.mode === "aof" && tx.kind === "life" && tx.id.endsWith(":life:1")).length, goal: 5, unit: "次 AOF Run" },
-    ].map(item => <div className="career-milestone" key={item.title}><b>{item.value >= item.goal ? "✓ " : "◇ "}{item.title}</b><span>{Math.min(item.value, item.goal)} / {item.goal} · {item.unit}</span></div>)}</section>
+    <section className="career-milestones" aria-label="職涯挑戰"><h2>職涯等級 {careerProgress(career).tier} / 4</h2><p>已參加 {careerProgress(career).total} 場；累計 3、10、25 場解鎖更高級別。首次錦標賽獲獎解鎖固定賞金賽。已玩過嘅級別會保留。</p><div className="career-milestone"><b>生涯戰績</b><span>Cash {careerProgress(career).cash} · 錦標賽 {careerProgress(career).tournaments} · 獲獎 {careerProgress(career).prizes} · AOF {careerProgress(career).aof}</span></div><h2>成就與里程碑</h2><p>以本機交易記錄計算，完成後保留。</p>{careerProgress(career).achievements.map(item => <div className="career-milestone" key={item.title}><b>{item.value >= item.goal ? "✓ " : "◇ "}{item.title}</b><span>{Math.min(item.value, item.goal)} / {item.goal} · {item.unit}</span></div>)}</section>
     <div className="mode-home-restore"><span>{lastSavedAt ? `上次本機儲存：${new Date(lastSavedAt).toLocaleString("zh-HK", { dateStyle: "short", timeStyle: "short" })}` : "尚未有已完成嘅牌局存檔"}</span><label><input type="checkbox" checked={autoResume} onChange={toggleAutoResume} /> 下次自動返回牌桌</label></div>
-    {backupControls}<section className="mode-home-choices" aria-label="選擇遊戲模式"><h2>開新場</h2><div className="mode-home-grid">
+    {backupControls}<button className="career-reset" type="button" onClick={() => void resetCareer()}>重設所有存檔</button><section className="mode-home-choices" aria-label="選擇遊戲模式"><h2>開新場</h2><div className="mode-home-grid">
       <button className="mode-home-choice" onClick={() => chooseMode("cash")}><span className="mode-icon">♠</span><span className="mode-copy"><small>01 · 現金桌</small><strong>Cash Game</strong><em>2–8 人 · 100BB · 最多補碼兩次</em></span><span className="mode-arrow">→</span></button>
       <button className="mode-home-choice" onClick={() => chooseMode("tournament")}><span className="mode-icon">♛</span><span className="mode-copy"><small>02 · 賽事</small><strong>錦標賽</strong><em>單桌或 200 人 · 升盲 · 獎勵圈</em></span><span className="mode-arrow">→</span></button>
       <button className="mode-home-choice" onClick={() => chooseMode("aof")}><span className="mode-icon">♦</span><span className="mode-copy"><small>03 · 快速娛樂</small><strong>AOF Run</strong><em>4 人 · 8BB · 三條命同 Boss Run</em></span><span className="mode-arrow">→</span></button>
@@ -3006,7 +3016,7 @@ export default function Home() {
       </section>
       {setupMode !== "aof" && <>
       <div className="lobby-brand"><div className="brand-mark">♠</div><div><span>100BB TRAINING TABLE</span><h2>開一張新牌桌</h2><p>揀總玩家人數及 AI 難度，再開始第一手。</p></div></div>
-      {lobbyGameMode === "tournament" && <div className="lobby-section mtt-selection"><div className="lobby-label"><span>賞金</span><div><b>賽事類型</b><small>固定賞金由遊戲提供，不額外收費或減少名次獎池</small></div></div><div className="mtt-choice" role="group" aria-label="賽事類型"><button className={!lobbyBounty ? "selected" : ""} aria-pressed={!lobbyBounty} onClick={() => setLobbyBounty(false)}><b>一般賽</b></button><button className={lobbyBounty ? "selected" : ""} aria-pressed={lobbyBounty} onClick={() => setLobbyBounty(true)}><b>固定賞金賽</b><small>每人 {fmt(lobbyTournamentEntry * .1)} C</small></button></div></div>}
+      {lobbyGameMode === "tournament" && <div className="lobby-section mtt-selection"><div className="lobby-label"><span>賞金</span><div><b>賽事類型</b><small>固定賞金由遊戲提供，不額外收費或減少名次獎池</small></div></div><div className="mtt-choice" role="group" aria-label="賽事類型"><button className={!lobbyBounty ? "selected" : ""} aria-pressed={!lobbyBounty} onClick={() => setLobbyBounty(false)}><b>一般賽</b></button><button disabled={!careerProgress(career).bounty} className={lobbyBounty ? "selected" : ""} aria-pressed={lobbyBounty} onClick={() => setLobbyBounty(true)}><b>固定賞金賽</b><small>{careerProgress(career).bounty ? `每人 ${fmt(lobbyTournamentEntry * .1)} C` : "首次錦標賽獲獎解鎖"}</small></button></div></div>}
       {lobbyGameMode === "tournament" && <div className="lobby-section mtt-selection"><div className="lobby-label"><span>賽制</span><div><b>選擇錦標賽規模</b><small>多桌賽每張桌最多八人，破桌只喺兩手之間進行</small></div></div><div className="mtt-choice" role="group" aria-label="錦標賽規模"><button className={!lobbyMtt ? "selected" : ""} aria-pressed={!lobbyMtt} onClick={() => setLobbyMtt(false)}><b>單桌</b><small>2–8 人 · 快速決勝</small></button><button className={lobbyMtt ? "selected" : ""} aria-pressed={lobbyMtt} onClick={() => setLobbyMtt(true)}><b>200 人多桌賽</b><small>25 桌 · 前 30 名有獎</small></button></div></div>}
       <div className="lobby-section">
         <div className="lobby-label"><span>01</span><div><b>{lobbyGameMode === "tournament" && lobbyMtt ? "你的牌桌" : "總玩家人數"}</b><small>{lobbyGameMode === "tournament" && lobbyMtt ? "200 人賽固定八人桌" : "包括你在內"}</small></div><strong>{lobbyGameMode === "tournament" && lobbyMtt ? "8-MAX" : `${lobbySize}-MAX`}</strong></div>
@@ -3024,13 +3034,13 @@ export default function Home() {
         {(Object.keys(TOURNAMENT_SPEEDS) as TournamentSpeed[]).map(speed => <button type="button" key={speed} className={lobbyTournamentSpeed === speed ? "selected" : ""} aria-pressed={lobbyTournamentSpeed === speed} onClick={() => setLobbyTournamentSpeed(speed)}><b>{TOURNAMENT_SPEEDS[speed].label}</b><span>{TOURNAMENT_SPEEDS[speed].startingStack} 籌碼</span><small>{lobbyMtt ? `${Math.round(MTT_LEVEL_MS[speed] / 60000)} 分鐘升盲` : `每 ${TOURNAMENT_SPEEDS[speed].handsPerLevel} 手升盲`}</small></button>)}
       </div></div>}
       {lobbyGameMode === "cash" && <p className="tournament-lobby-note"><b>壞運大獎 · {fmt(lobbyCashBb * 100)} C</b><span>攤牌時你以四條或更強牌輸掉有資格爭奪嘅底池即可獲獎。每手最多一次；遊戲提供，毋須額外費用。</span></p>}
-      <div className="lobby-section career-stakes"><div className="lobby-label"><span>{lobbyGameMode === "tournament" ? "04" : "03"}</span><div><b>{lobbyGameMode === "tournament" ? "報名費" : "Cash 盲注級別"}</b><small>{lobbyGameMode === "tournament" ? `入場扣款；獎池由${lobbyMtt ? "全場 200 人" : "全桌"}報名費組成` : "每次買入固定 100BB；補碼另扣款"}</small></div></div><div className="career-stake-grid" role="group" aria-label="選擇級別">{lobbyGameMode === "tournament" ? TOURNAMENT_ENTRIES.map(entry => <button key={entry} className={lobbyTournamentEntry === entry ? "selected" : ""} aria-pressed={lobbyTournamentEntry === entry} onClick={() => setLobbyTournamentEntry(entry)}>{entry} C<small>獎池 {entry * (lobbyMtt ? MTT_ENTRIES : lobbySize)} C</small></button>) : CASH_BIG_BLINDS.map(bb => <button key={bb} className={lobbyCashBb === bb ? "selected" : ""} aria-pressed={lobbyCashBb === bb} onClick={() => setLobbyCashBb(bb)}>{fmt(bb / 2)} / {bb}<small>買入 {bb * 100} C</small></button>)}</div><div className={`career-risk ${standardRisk.level}`} role="status" aria-live="polite"><div><b>{standardRisk.level === "comfortable" ? "資金充足" : standardRisk.level === "caution" ? "資金風險較高" : "資金不足"}</b><span>目前可支付 {standardRisk.affordableEntries} 次{lobbyGameMode === "cash" ? " 100BB 買入" : "報名"}</span></div><p>今次先扣 <strong>{fmt(standardRisk.initialCost)} C</strong>{lobbyGameMode === "cash" && <> · 連兩次 Re-buy 最多 <strong>{fmt(standardRisk.maximumCost)} C</strong></>}</p><small>{riskDescription(standardRisk, lobbyGameMode)}{cashStartingBalance !== career.balance && " 已計入完手後可兌回嘅 Cash 桌上籌碼。"}</small></div></div>
+      <div className="lobby-section career-stakes"><div className="lobby-label"><span>{lobbyGameMode === "tournament" ? "04" : "03"}</span><div><b>{lobbyGameMode === "tournament" ? "報名費" : "Cash 盲注級別"}</b><small>{lobbyGameMode === "tournament" ? `入場扣款；獎池由${lobbyMtt ? "全場 200 人" : "全桌"}報名費組成` : "每次買入固定 100BB；補碼另扣款"}</small></div></div><div className="career-stake-grid" role="group" aria-label="選擇級別">{lobbyGameMode === "tournament" ? TOURNAMENT_ENTRIES.map((entry, index) => <button disabled={!careerProgress(career).stakes("tournament", TOURNAMENT_ENTRIES)[index]} title={careerProgress(career).stakes("tournament", TOURNAMENT_ENTRIES)[index] ? "" : `職涯等級 ${index + 1} 解鎖`} key={entry} className={lobbyTournamentEntry === entry ? "selected" : ""} aria-pressed={lobbyTournamentEntry === entry} onClick={() => setLobbyTournamentEntry(entry)}>{entry} C<small>{careerProgress(career).stakes("tournament", TOURNAMENT_ENTRIES)[index] ? `獎池 ${entry * (lobbyMtt ? MTT_ENTRIES : lobbySize)} C` : `等級 ${index + 1} 解鎖`}</small></button>) : CASH_BIG_BLINDS.map((bb, index) => <button disabled={!careerProgress(career).stakes("cash", CASH_BIG_BLINDS)[index]} title={careerProgress(career).stakes("cash", CASH_BIG_BLINDS)[index] ? "" : `職涯等級 ${index + 1} 解鎖`} key={bb} className={lobbyCashBb === bb ? "selected" : ""} aria-pressed={lobbyCashBb === bb} onClick={() => setLobbyCashBb(bb)}>{fmt(bb / 2)} / {bb}<small>{careerProgress(career).stakes("cash", CASH_BIG_BLINDS)[index] ? `買入 ${bb * 100} C` : `等級 ${index + 1} 解鎖`}</small></button>)}</div><div className={`career-risk ${standardRisk.level}`} role="status" aria-live="polite"><div><b>{standardRisk.level === "comfortable" ? "資金充足" : standardRisk.level === "caution" ? "資金風險較高" : "資金不足"}</b><span>目前可支付 {standardRisk.affordableEntries} 次{lobbyGameMode === "cash" ? " 100BB 買入" : "報名"}</span></div><p>今次先扣 <strong>{fmt(standardRisk.initialCost)} C</strong>{lobbyGameMode === "cash" && <> · 連兩次 Re-buy 最多 <strong>{fmt(standardRisk.maximumCost)} C</strong></>}</p><small>{riskDescription(standardRisk, lobbyGameMode)}{cashStartingBalance !== career.balance && " 已計入完手後可兌回嘅 Cash 桌上籌碼。"}</small></div></div>
       </>}
       {setupMode === "aof" && <div className="lobby-brand"><div className="brand-mark">♦</div><div><span>ALL-IN OR FOLD</span><h2>AOF Run 設定</h2><p>揀盲注級別，然後開始新 Run 或繼續目前進度。</p></div></div>}
       {setupMode === "aof" && <>
       <div className="lobby-section"><div className="lobby-label"><span>AOF</span><div><b>選擇玩法</b><small>開始新牌桌時生效；目前進度可繼續</small></div></div><div className="mtt-choice" role="group" aria-label="選擇 AOF 玩法"><button type="button" className={lobbyAofVariant === "run" ? "selected" : ""} aria-pressed={lobbyAofVariant === "run"} onClick={() => setLobbyAofVariant("run")}><b>三命 Run</b><small>保留 Boss 挑戰及三條命</small></button><button type="button" className={lobbyAofVariant === "standard" ? "selected" : ""} aria-pressed={lobbyAofVariant === "standard"} onClick={() => setLobbyAofVariant("standard")}><b>標準 AOF</b><small>8BB 買入 · 爆倉後可再買入</small></button></div></div>
       <p className="tournament-lobby-note"><b>壞運大獎 · {fmt(lobbyAofBb * 100)} C</b><span>攤牌時你以四條或更強牌輸掉有資格爭奪嘅底池即可獲獎。每手最多一次；遊戲提供，毋須額外費用。</span></p>
-      <div className="lobby-section career-stakes" id="aof-stakes"><div className="lobby-label"><span>AOF</span><div><b>AOF 盲注級別</b><small>{lobbyAofVariant === "standard" ? "8BB 一次買入；爆倉後可重新買入" : "8BB 一條命；只喺爆倉補命時再扣款"}</small></div></div><div className="career-stake-grid" role="group" aria-label="AOF 級別">{AOF_BIG_BLINDS.map(bb => <button key={bb} className={lobbyAofBb === bb ? "selected" : ""} aria-pressed={lobbyAofBb === bb} onClick={() => setLobbyAofBb(bb)}>{fmt(bb / 2)} / {bb}<small>{lobbyAofVariant === "standard" ? "每次買入" : "每條命"} {bb * 8} C</small></button>)}</div><div className={`career-risk ${aofRisk.level}`} role="status" aria-live="polite"><div><b>{aofRisk.level === "comfortable" ? "資金充足" : aofRisk.level === "caution" ? "資金風險較高" : "資金不足"}</b><span>{lobbyAofVariant === "standard" ? `可支付 ${aofRisk.affordableEntries} 次買入` : `可支付 ${aofRisk.affordableEntries} 條命 · 完整三命 ${Math.floor(aofStartingBalance / aofRisk.maximumCost)} 次`}</span></div><p>開局先扣 <strong>{fmt(aofRisk.initialCost)} C</strong>{lobbyAofVariant === "run" && <> · 三命最多 <strong>{fmt(aofRisk.maximumCost)} C</strong></>}</p><small>{lobbyAofVariant === "standard" ? "每次重新買入先扣 8BB；離桌時兌回剩餘籌碼。" : riskDescription(aofRisk, "aof")}{aofStartingBalance !== career.balance && " 開新 Run 時先兌回目前桌上籌碼。"}</small></div><button className="career-aof-launch" disabled={!!aof && (!aof.game.finished || aofPresentation(aof).revealing)} onClick={startNewAof}>{aof ? `以所選級別開始新${lobbyAofVariant === "standard" ? "標準 AOF" : "三命 Run"}` : `開始${lobbyAofVariant === "standard" ? "標準 AOF" : "三命 Run"}`}</button>{aof && <button className="resume-table" onClick={enterAof}>繼續目前 AOF Run{career.aof ? ` · BB ${career.aof.bb} C` : ""}</button>}</div>
+      <div className="lobby-section career-stakes" id="aof-stakes"><div className="lobby-label"><span>AOF</span><div><b>AOF 盲注級別</b><small>{lobbyAofVariant === "standard" ? "8BB 一次買入；爆倉後可重新買入" : "8BB 一條命；只喺爆倉補命時再扣款"}</small></div></div><div className="career-stake-grid" role="group" aria-label="AOF 級別">{AOF_BIG_BLINDS.map((bb, index) => <button disabled={!careerProgress(career).stakes("aof", AOF_BIG_BLINDS)[index]} title={careerProgress(career).stakes("aof", AOF_BIG_BLINDS)[index] ? "" : `職涯等級 ${index + 1} 解鎖`} key={bb} className={lobbyAofBb === bb ? "selected" : ""} aria-pressed={lobbyAofBb === bb} onClick={() => setLobbyAofBb(bb)}>{fmt(bb / 2)} / {bb}<small>{careerProgress(career).stakes("aof", AOF_BIG_BLINDS)[index] ? `${lobbyAofVariant === "standard" ? "每次買入" : "每條命"} ${bb * 8} C` : `等級 ${index + 1} 解鎖`}</small></button>)}</div><div className={`career-risk ${aofRisk.level}`} role="status" aria-live="polite"><div><b>{aofRisk.level === "comfortable" ? "資金充足" : aofRisk.level === "caution" ? "資金風險較高" : "資金不足"}</b><span>{lobbyAofVariant === "standard" ? `可支付 ${aofRisk.affordableEntries} 次買入` : `可支付 ${aofRisk.affordableEntries} 條命 · 完整三命 ${Math.floor(aofStartingBalance / aofRisk.maximumCost)} 次`}</span></div><p>開局先扣 <strong>{fmt(aofRisk.initialCost)} C</strong>{lobbyAofVariant === "run" && <> · 三命最多 <strong>{fmt(aofRisk.maximumCost)} C</strong></>}</p><small>{lobbyAofVariant === "standard" ? "每次重新買入先扣 8BB；離桌時兌回剩餘籌碼。" : riskDescription(aofRisk, "aof")}{aofStartingBalance !== career.balance && " 開新 Run 時先兌回目前桌上籌碼。"}</small></div><button className="career-aof-launch" disabled={!!aof && (!aof.game.finished || aofPresentation(aof).revealing)} onClick={startNewAof}>{aof ? `以所選級別開始新${lobbyAofVariant === "standard" ? "標準 AOF" : "三命 Run"}` : `開始${lobbyAofVariant === "standard" ? "標準 AOF" : "三命 Run"}`}</button>{aof && <button className="resume-table" onClick={enterAof}>繼續目前 AOF Run{career.aof ? ` · BB ${career.aof.bb} C` : ""}</button>}</div>
       </>}
       {setupMode !== "aof" && <>
       <HandFilterPanel filter={handFilter} onChange={setHandFilter} tableSize={lobbySize} />

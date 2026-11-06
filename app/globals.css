@@ -483,3 +483,5 @@ main.aof-shell>.aof-table{height:560px}.aof-shell .aof-table .aof-flip{animation
 @media(max-height:750px){.peel-context-note{display:none}.peel-card{width:min(40vw,150px)}.peel-overlay{align-items:flex-start}.peel-dialog{max-height:none}}
 
 .result-panel .jackpot-result { color: #ffe2a1; font-size: 12px; font-weight: 700; line-height: 1.4; }
+
+.career-reset{min-height:44px;padding:10px 14px;border:1px solid #b87d72;border-radius:10px;background:#35221f;color:#ffd9cf;cursor:pointer;font:inherit}.career-stake-grid button:disabled,.mtt-choice button:disabled{opacity:.5;cursor:not-allowed}.career-milestones h2:not(:first-child){margin-top:18px}

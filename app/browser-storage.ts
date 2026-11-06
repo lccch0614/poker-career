@@ -1,6 +1,6 @@
 // GitHub Pages edition: the same game state API backed by this browser.
 // There is no remote service, shared bankroll, or ChatGPT identity in this edition.
-type StoredSave = { state?: unknown; updatedAt: number; encoding?: "gzip-base64"; compressed?: string };
+type StoredSave = { state?: unknown; updatedAt: number; encoding?: "gzip-base64"; compressed?: string; reset?: boolean };
 
 async function compressState(body: string): Promise<string> {
   const stream = new Blob([body]).stream().pipeThrough(new CompressionStream("gzip"));
@@ -31,14 +31,14 @@ export async function pokerStateFetch(_url: string, init: RequestInit = {}): Pro
         const value = JSON.parse(raw) as StoredSave;
         if (!value || !Number.isSafeInteger(value.updatedAt)) throw new Error("Invalid save");
         if (value.encoding === "gzip-base64" && typeof value.compressed === "string") value.state = await decompressState(value.compressed);
-        if (!value.state) throw new Error("Invalid save");
+        if (!value.state && value.reset !== true) throw new Error("Invalid save");
         saved = value;
       }
     } catch {
       return Response.json({ error: "Browser save is unavailable or damaged" }, { status: 503 });
     }
     if (!init.method || init.method.toUpperCase() === "GET") {
-      return Response.json({ state: saved?.state ?? null, updatedAt: saved?.updatedAt ?? null, cacheOwner: `local:${key}` });
+      return Response.json({ state: saved?.state ?? null, updatedAt: saved?.updatedAt ?? null, cacheOwner: `local:${key}`, reset: saved?.reset === true });
     }
     if (init.method.toUpperCase() !== "PUT") return Response.json({ error: "Unsupported method" }, { status: 405 });
     const revision = Number(new Headers(init.headers).get("x-save-revision"));
@@ -81,6 +81,21 @@ export async function pokerStateFetch(_url: string, init: RequestInit = {}): Pro
   };
   if (navigator.locks) return navigator.locks.request(storageKey(), run);
   return run();
+}
+
+/** Keep a portable recovery copy, then replace the primary with a revisioned reset marker. */
+export async function resetSaveState(expected: { primary: string | null; backup: string | null }): Promise<void> {
+  const run = () => {
+    const key = storageKey();
+    const current = readSaveBackup();
+    if (current.primary !== expected.primary || current.backup !== expected.backup) throw new Error("存檔已被其他分頁更新，請重新載入後再試。");
+    const previousRevision = (() => { try { return JSON.parse(current.primary ?? "null")?.updatedAt ?? 0; } catch { return 0; } })();
+    const revision = Math.max(Date.now(), Number.isSafeInteger(previousRevision) ? previousRevision + 1 : 1);
+    window.localStorage.setItem(`poker-before-import:${key}`, JSON.stringify({ ...current, preservedAt: new Date().toISOString() }));
+    window.localStorage.setItem(key, JSON.stringify({ state: null, reset: true, updatedAt: revision }));
+  };
+  if (navigator.locks) await navigator.locks.request(storageKey(), run);
+  else run();
 }
 
 /** Read both raw records without modifying them, including damaged JSON. */
