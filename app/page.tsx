@@ -2932,7 +2932,14 @@ export default function Home() {
       const expected = readSaveBackup();
       if (!window.confirm("重設會清除目前生涯、資金、進行中牌局、成就及牌局紀錄，並由 3,000 C 重新開始。原存檔會保存在本機，可用「下載匯入前存檔」備份。請先關閉其他遊戲分頁。確定重設？")) return;
       if (saveInFlight.current || pendingSave.current) throw new Error("目前進度仍在儲存，請稍後再試。");
-      await resetSaveState(expected);
+      try {
+        await resetSaveState(expected);
+      } catch (error) {
+        if (!(error instanceof Error) || error.name !== "ResetBackupQuotaExceeded") throw error;
+        if (!window.confirm("儲存空間不足，無法保留重設前備份。繼續會取代目前存檔，而且未必可以還原。建議先按取消，再使用「下載存檔備份」。確定要不保留備份而重設？")) return;
+        if (saveInFlight.current || pendingSave.current) throw new Error("目前進度仍在儲存，請稍後再試。");
+        await resetSaveState(expected, true);
+      }
       window.location.reload();
     } catch (error) { window.alert(`未能重設：${error instanceof Error ? error.message : "請檢查瀏覽器儲存空間"}。原有存檔已保留。`); }
   };

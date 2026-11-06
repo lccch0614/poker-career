@@ -83,15 +83,26 @@ export async function pokerStateFetch(_url: string, init: RequestInit = {}): Pro
   return run();
 }
 
-/** Keep a portable recovery copy, then replace the primary with a revisioned reset marker. */
-export async function resetSaveState(expected: { primary: string | null; backup: string | null }): Promise<void> {
+/** Preserve a recovery copy unless the user explicitly chooses to reset without one. */
+export async function resetSaveState(expected: { primary: string | null; backup: string | null }, withoutRecovery = false): Promise<void> {
   const run = () => {
     const key = storageKey();
     const current = readSaveBackup();
     if (current.primary !== expected.primary || current.backup !== expected.backup) throw new Error("存檔已被其他分頁更新，請重新載入後再試。");
     const previousRevision = (() => { try { return JSON.parse(current.primary ?? "null")?.updatedAt ?? 0; } catch { return 0; } })();
     const revision = Math.max(Date.now(), Number.isSafeInteger(previousRevision) ? previousRevision + 1 : 1);
-    window.localStorage.setItem(`poker-before-import:${key}`, JSON.stringify({ ...current, preservedAt: new Date().toISOString() }));
+    if (!withoutRecovery) {
+      try {
+        window.localStorage.setItem(`poker-before-import:${key}`, JSON.stringify({ ...current, preservedAt: new Date().toISOString() }));
+      } catch (error) {
+        if (error instanceof Error && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")) {
+          const quotaError = new Error("儲存空間不足，無法保留重設前備份。");
+          quotaError.name = "ResetBackupQuotaExceeded";
+          throw quotaError;
+        }
+        throw error;
+      }
+    }
     window.localStorage.setItem(key, JSON.stringify({ state: null, reset: true, updatedAt: revision }));
   };
   if (navigator.locks) await navigator.locks.request(storageKey(), run);
