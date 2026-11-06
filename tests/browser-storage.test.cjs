@@ -9,6 +9,40 @@ global.document = { baseURI: 'https://example.github.io/poker/' };
 Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true });
 const { pokerStateFetch } = require('../app/browser-storage.ts');
 
+test('reset preserves recovery, advances revision and rejects stale writes', async () => {
+  global.document.baseURI = 'https://example.github.io/reset/';
+  const { storageKey, readSaveBackup, resetSaveState } = require('../app/browser-storage.ts');
+  const key = storageKey();
+  const state = { version: 2, career: { balance: 123 } };
+  values.set(key, JSON.stringify({ state, updatedAt: 12 }));
+  values.set(`poker-local-save:local:${key}`, JSON.stringify(state));
+  const expected = readSaveBackup();
+  await resetSaveState(expected);
+  const result = await (await pokerStateFetch('')).json();
+  assert.equal(result.state, null);
+  assert.equal(result.reset, true);
+  assert.ok(result.updatedAt > 12);
+  assert.deepEqual(JSON.parse(values.get(`poker-before-import:${key}`)).primary, expected.primary);
+  const stale = await pokerStateFetch('', { method: 'PUT', headers: { 'x-save-revision': '12' }, body: JSON.stringify(state) });
+  assert.equal(stale.status, 409);
+  await assert.rejects(() => resetSaveState(expected));
+  global.document.baseURI = 'https://example.github.io/poker/';
+});
+
+test('reset refuses to overwrite a save if its recovery backup cannot be preserved', async () => {
+  global.document.baseURI = 'https://example.github.io/reset-full/';
+  const { storageKey, readSaveBackup, resetSaveState } = require('../app/browser-storage.ts');
+  const key = storageKey();
+  const old = JSON.stringify({ state: { version: 2, career: { balance: 55 } }, updatedAt: 7 });
+  values.set(key, old);
+  const setItem = window.localStorage.setItem;
+  window.localStorage.setItem = () => { throw new Error('quota'); };
+  try { await assert.rejects(() => resetSaveState(readSaveBackup())); }
+  finally { window.localStorage.setItem = setItem; }
+  assert.equal(values.get(key), old);
+  global.document.baseURI = 'https://example.github.io/poker/';
+});
+
 test('local save survives reload, accepts large history, and rejects stale tabs', async () => {
   const first = await (await pokerStateFetch('/api/poker-state')).json();
   assert.equal(first.state, null);
