@@ -43,6 +43,32 @@ test('reset refuses to overwrite a save if its recovery backup cannot be preserv
   global.document.baseURI = 'https://example.github.io/poker/';
 });
 
+test('quota-limited reset requires an explicit choice and still rejects stale saves', async () => {
+  global.document.baseURI = 'https://example.github.io/reset-quota/';
+  const { storageKey, readSaveBackup, resetSaveState } = require('../app/browser-storage.ts');
+  const key = storageKey();
+  const old = JSON.stringify({ state: { version: 2, career: { balance: 55 } }, updatedAt: 7 });
+  values.set(key, old);
+  const expected = readSaveBackup();
+  const setItem = window.localStorage.setItem;
+  window.localStorage.setItem = (itemKey, value) => {
+    if (itemKey.startsWith('poker-before-import:')) throw new DOMException('Full', 'QuotaExceededError');
+    setItem(itemKey, value);
+  };
+  try {
+    await assert.rejects(() => resetSaveState(expected), { name: 'ResetBackupQuotaExceeded' });
+    assert.equal(values.get(key), old);
+    values.set(key, JSON.stringify({ state: { version: 2, career: { balance: 60 } }, updatedAt: 8 }));
+    await assert.rejects(() => resetSaveState(expected, true), /其他分頁/);
+    values.set(key, old);
+    await resetSaveState(expected, true);
+    const result = await (await pokerStateFetch('')).json();
+    assert.equal(result.reset, true);
+    assert.equal(result.state, null);
+    assert.equal((await pokerStateFetch('', { method: 'PUT', headers: { 'x-save-revision': '7' }, body: JSON.stringify({ version: 2, career: {} }) })).status, 409);
+  } finally { window.localStorage.setItem = setItem; global.document.baseURI = 'https://example.github.io/poker/'; }
+});
+
 test('local save survives reload, accepts large history, and rejects stale tabs', async () => {
   const first = await (await pokerStateFetch('/api/poker-state')).json();
   assert.equal(first.state, null);
