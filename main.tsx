@@ -4,3 +4,4 @@ import Home from "./app/page";
 import "./app/globals.css";
 
 createRoot(document.getElementById("root")!).render(<Home />);
+import "./app/portrait.css";
