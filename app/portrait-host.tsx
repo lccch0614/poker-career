@@ -35,15 +35,37 @@ export function usePortraitTable() {
   },[portrait,panel]);
   return {portrait,panel,setPanel,hud,setHud};
 }
-export function PortraitHeader({ui,title,meta,heroTurn}:{heroTurn:boolean;ui:ReturnType<typeof usePortraitTable>,title:string,meta:string}) {
+export function PortraitHeader({ui,title,meta,heroTurn,filterEnabled,decision}:{filterEnabled?:boolean;decision?:string;heroTurn:boolean;ui:ReturnType<typeof usePortraitTable>,title:string,meta:string}) {
   const settings = useRef<HTMLButtonElement>(null);
+  const header=useRef<HTMLElement>(null);
+  const [away,setAway]=useState(false);
+  function jump(filter:boolean) {
+    const shell=header.current?.closest('main');
+    const target=shell?.querySelector<HTMLElement>(filter?'.hand-filter-panel':'.hand-filter-panel,.aof-bankroll');
+    if(!target)return;
+    if(filter && target instanceof HTMLDetailsElement)target.open=true;
+    target.scrollIntoView({block:'start'});
+    target.querySelector<HTMLElement>('summary')?.focus({preventScroll:true});
+  }
+  useLayoutEffect(()=>{
+    const el=header.current, shell=el?.closest('main');
+    if(!el || !shell || ui.panel)return;
+    const size=new ResizeObserver(()=>shell.style.setProperty('--header-h',el.offsetHeight+'px'));
+    size.observe(el);
+    const actions=shell.querySelector('.controls,.aof-actions');
+    const observer=new IntersectionObserver(([entry])=>setAway(!entry.isIntersecting && shell.scrollTop>0),{root:shell});
+    if(actions)observer.observe(actions);
+    return ()=>{size.disconnect();observer.disconnect()};
+  },[ui.panel,heroTurn]);
   const hadPanel = useRef(false);
   useLayoutEffect(()=>{
     if(hadPanel.current && !ui.panel) settings.current?.focus({preventScroll:true});
     hadPanel.current=!!ui.panel;
   },[ui.panel]);
-  return <header className="pt-header"><div><small>POKER CAREER</small><h1>{title}</h1></div>
+  return <header ref={header} className="pt-header"><div><small>POKER CAREER</small><h1>{title}</h1></div>
     {ui.panel ? <button className="pt-back" onClick={()=>ui.setPanel('')}>{heroTurn?'輪到你 · 返回牌桌':'返回牌桌'}</button> : <button ref={settings} onClick={()=>ui.setPanel('settings')}>牌桌設定</button>}
+    {!ui.panel && <><button onClick={()=>jump(false)}>牌桌資料</button>{filterEnabled!==undefined && <button onClick={()=>jump(true)}>自動棄牌 · {filterEnabled?'開':'關'}</button>}</>}
+    {away && heroTurn && !ui.panel && <button className="pt-scroll-return" onClick={()=>{header.current?.closest('main')?.querySelector('.pt-choices,.aof-actions')?.scrollIntoView({block:'end'})}}>輪到你 · {decision || '全押或棄牌'} · 返回牌桌</button>}
     <div className="pt-meta"><span>{meta}</span><button aria-pressed={ui.hud} onClick={()=>ui.setHud(!ui.hud)}>HUD {ui.hud?'ON':'OFF'}</button></div></header>;
 }
 type SeatView = {sample:number;metrics:string[];bet:string;slot:number;name:string;initial:string;position:string;stack:string;action:string;stats:string;cards:string[];folded:boolean;acting:boolean};

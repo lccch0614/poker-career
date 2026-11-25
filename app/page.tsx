@@ -1901,7 +1901,7 @@ function HandFilterPanel({ filter, onChange, currentPosition, tableSize = 8 }: {
   };
   return <details className="hand-filter-panel">
     <summary><span><b>起手牌篩選</b><small>{filter.enabled ? filter.scope === "position" ? `按位置 ON${currentPosition ? ` · 本手 ${currentPosition} 約 ${currentPercent}%` : " · 8 個獨立 range"}` : `全位置 ON · 約 ${percent}% range` : "已關閉 · 由你決定每手牌"}</small></span><span className="hand-filter-open">設定</span></summary>
-    <div className="hand-filter-content">
+    <div className="hand-filter-content">{!canEnable && <p>先選擇起手牌範圍</p>}
       <label className="hand-filter-switch"><input type="checkbox" checked={filter.enabled} disabled={!canEnable} onChange={event => onChange({ ...filter, enabled: event.target.checked })} /><span>啟用自動棄牌</span></label>
       <p>適用於 Cash Game 同錦標賽翻牌前、你第一次行動；不在範圍內就自動 Fold，結束後自動開下一手。盲注仍會扣除；符合範圍嘅手牌由你自行操作。AOF 不受影響。</p>
       <div className="hand-filter-scope" role="group" aria-label="選擇起手牌範圍模式">
@@ -3153,7 +3153,7 @@ export default function Home() {
     const logged = addLog(result, `你提議 ${requested} 次；${choices.map(choice => `${previous.players[choice.index].name} 接受最多 ${choice.count} 次`).join("、")}；最終派 ${runs} 次`);
     return { ...logged, message: result.message };
   })} />}<main className={`app-shell standard-motion-${motionMode} ${mobile.portrait ? "pt-shell" : ""}`} data-panel={mobile.panel} aria-hidden={!!standardCinematic || !!game.runoutPending} inert={!!standardCinematic || !!game.runoutPending}>
-    {mobile.portrait && <PortraitHeader heroTurn={!game.finished && game.turn===0} ui={mobile} title={isTournament ? (mtt?"多桌錦標賽":"單桌錦標賽") : `${tableSize} 人現金桌`}
+    {mobile.portrait && <PortraitHeader heroTurn={!game.finished && game.turn===0} filterEnabled={handFilter.enabled} decision={(toCall>0 ? `跟注 ${fmt(Math.min(toCall,hero.stack))} ${unit}` : "可以過牌")+(timedTurnActive && tournamentClock?.turnKey===tournamentTurnKey ? ` · ${Math.ceil(tournamentClock.remainingMs/1000)} 秒`:"")} ui={mobile} title={isTournament ? (mtt?"多桌錦標賽":"單桌錦標賽") : `${tableSize} 人現金桌`}
       meta={`${saveStatus==="error"?"儲存失敗 · ":""}#${game.handNo} · ${fmt(game.smallBlind ?? .5)} / ${fmt(game.bigBlind ?? 1)} ${isTournament?"籌碼":"BB"}${game.bigBlindAnte ? " · Ante "+fmt(game.bigBlindAnte):""} · ${STREET_LABEL[game.street]}`} />}
     <div className="three-mode-picker table-mode-picker" role="group" aria-label="切換遊戲模式">
       <button className={gameMode === "cash" ? "selected" : ""} onClick={() => openModeLobby("cash")}><b>Cash</b><small>100BB</small></button>
