@@ -142,3 +142,29 @@ main.pt-aof[data-live=true][data-panel=""]>:is(.pt-native,.aof-actions,.pt-settl
 main.pt-aof[data-live=true][data-panel=""]>.pt-native{height:max(400px,calc(100dvh - var(--header-h,110px) - 220px))}
 .pt-header .pt-scroll-return{position:fixed;bottom:max(6px,env(safe-area-inset-bottom));left:4%;width:92%;z-index:30;background:#f2ca50;color:#221e14}
 }
+@media(max-width:700px) and (orientation:portrait){
+.pt-header{position:relative}
+.pt-filter-quick{display:flex;flex-basis:100%;gap:5px;margin-top:4px}
+.pt-filter-quick>[role=switch][aria-checked=true]{background:#254735;color:#e3f0df}
+.pt-filter-presets{position:absolute;z-index:24;inset:100% 0 auto;padding:10px;background:#17231d;border:1px solid #706c53;border-radius:8px}
+.pt-filter-presets p{margin:0 0 8px}
+.pt-filter-presets div{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+.pt-shell .pt-betdock .action.primary{background:#293d55;border:1px solid #71889e;color:#ecf4fe}
+.pt-betdock .raise-presets button[aria-pressed=true]{background:#524422;color:#ffe3a0;border:1px solid #b69d60}
+.pt-size-preview{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 7px}
+.pt-betdock[data-sizing=false] .pt-size-preview{display:none}
+.pt-shell .pt-betdock .raise-cost{text-align:left}
+.pt-seat{font-variant-numeric:tabular-nums}
+.pt-seat .pt-avatar{height:16px;width:11px;left:35%;transform:rotate(-8deg);background:#a88b44}
+.pt-seat:is(.has-cards,.folded,[data-slot="0"]) .pt-avatar{display:none}
+.pt-seat .pt-action:empty,.pt-seat .pt-stats:empty,.pt-message:empty{display:none}
+.pt-seat.acting .pt-action{display:block;color:#ffe097;font-size:11px}
+.pt-seat.folded .pt-name{opacity:.94}
+.pt-wager:not(.has-chip):before{display:none}
+.pt-seat.recent-action .pt-wager{background:#e3efe4;color:#143024;max-width:115%;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.pt-seat[data-slot="1"] .pt-wager,.pt-seat[data-slot="6"] .pt-wager,.pt-seat[data-slot="7"] .pt-wager{top:auto;bottom:100%;margin-bottom:4px}
+.pt-seat[data-slot="0"] .pt-wager{max-width:65%}
+}
+@media(max-width:700px) and (orientation:portrait){
+main.pt-aof[data-live=true][data-panel=""]>.aof-header{display:flex;flex:none}
+}

@@ -1508,8 +1508,35 @@ function madeHandText(hole:Card[], board:Card[]) {
 function hudRate(part:number,total:number) { return total>0 ? statPercent(part,total)+"%" : "—"; }
 function handNet(game:Game,unit:string) {
   const delta=game.players[0].stack-game.startingStacks[0];
-  return `本手淨額 ${delta>0?"+":""}${fmt(delta)} ${unit}`;
+  if (Math.abs(delta) < 1e-8) return `本手打和 · 0 ${unit}`;
+  return `本手淨${delta>0?"贏":"輸"} ${fmt(Math.abs(delta))} ${unit}`;
 }
+function portraitResult(game: Game, unit: string) {
+  const awards = game.showdownAwards ?? [];
+  const heroAwards = awards.filter(award => award.winners.includes(0));
+  const won = heroAwards.filter(award => !award.refund);
+  const returned = heroAwards.filter(award => award.refund).reduce((sum, award) => sum + award.share, 0);
+  const multipleRuns = (game.runoutBoards?.length ?? 1) > 1;
+  const multiplePots = awards.some(award => award.layer > 0 && !award.refund);
+  const context = [multipleRuns ? `${game.runoutBoards!.length} 次發牌` : "", multiplePots ? "多個底池" : ""].filter(Boolean).join(" · ");
+  const payout = won.length ? won.map(award => {
+    const pot = award.layer ? `邊池 ${award.layer}` : "主池";
+    const opponents = award.winners.length - 1;
+    const run = multipleRuns ? `第 ${award.run + 1} 次 · ` : "";
+    return `${run}${opponents ? `你同 ${opponents} 位對手平分` : "你贏得"}${pot}，分得 ${fmt(award.share)} ${unit}`;
+  }).join("；") : winnerText(game);
+  return [payout, returned > 0 ? `未跟注退回 ${fmt(returned)} ${unit}` : "", context].filter(Boolean).join(" · ");
+}
+
+function portraitStreetActions(game: Game) {
+  if (game.finished) return {};
+  const actions = (game.timeline ?? []).filter(frame => frame.street === game.street && frame.actor !== null);
+  const latest = actions.at(-1);
+  const aggression = [...actions].reverse().find(frame => /^(下注|加注|ALL-IN)/.test(frame.players[frame.actor!].lastAction)
+    && frame.currentBet > (game.timeline[frame.id - 1]?.currentBet ?? 0));
+  return { latest, aggression };
+}
+
 function winnerText(game:Game) {
   if(game.street!=="showdown") return game.message;
   return (game.runoutBoards?.length ? game.runoutBoards : [game.board]).map((board,run)=>{
@@ -1697,6 +1724,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, squeezeEnabl
       : paid ? <div className="aof-actions"><button className="aof-jam" onClick={next}>{nextLifeNeeded && !legacy ? careerBalance >= nextLifeCost ? `補命 ${fmt(nextLifeCost)} C · 下一手` : "餘額不足 · 結束 Run" : "下一手 · 籌碼延續"}</button></div>
       : <div className="aof-actions"><button disabled={game.turn !== 0} onClick={() => move(false)}>Fold 棄牌</button><button className="aof-jam" disabled={game.turn !== 0} onClick={() => move(true)}>{game.turn !== 0 ? "等待其他玩家" : `${facingAllIn && !canRaiseAllIn ? "Call All-in" : "All-in"} · ${fmt(game.players[0].stack)}BB`}</button><button disabled={game.turn !== 0} onClick={() => setHint(!hint)}>AOF 提示</button></div>;
   const nativeAof = mobile.portrait;
+  const aofRecent = nativeAof ? portraitStreetActions(game).latest : undefined;
   return <main className={`aof-shell aof-theme-${theme} ${reduced ? "aof-reduced" : ""} ${mobile.portrait ? "pt-aof" : ""}`} data-panel={mobile.panel} data-live={nativeAof}>
     {mobile.portrait && <PortraitHeader heroTurn={!game.finished && game.turn===0} ui={mobile} title={standard ? "標準 AOF" : boss ? boss.name : "三命 AOF"} meta={`#${game.handNo} · 0.5 / 1 BB · Ante 0.25`} />}
     <header className="aof-header"><div><span>ALL-IN OR FOLD · {standard ? "標準牌桌" : boss ? "BOSS RUN" : "三命 RUN"}</span><h1>AOF · 4 人 · 8BB BUY-IN</h1></div><button onClick={onExit}>返回標準模式</button></header>
@@ -1714,11 +1742,13 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, squeezeEnabl
     {nativeAof ? <><PortraitFelt onSeat={i=>mobile.setPanel("aof-seat-"+i)} view={{
       hand:game.tableId+"-"+game.handNo,pots:paid?game.potSummary:[],board:displayBoard.map(portraitCard), pot:`${fmt(paid ? game.settledBets.reduce((a,b)=>a+b,0) : view.pot)} BB`, message:foldReveal?"娛樂揭牌 · 假設牌面":revealing?stageLabel:game.log[0] || game.message,
       hint:revealing ? [moment?.title || duel?.title,outs[contenders.indexOf(0)]?.behind ? `${outs[contenders.indexOf(0)].win.length} 反超 outs` : ""].filter(Boolean).join(" · ") : standard?"":`餘下 ${lives[0]} 條命`, seats:view.players.map((p,i)=>({
-        bet:p.streetBet ? fmt(p.streetBet)+" BB" : "",slot:SEAT_SLOTS[4][i],name:i===boss?.seat ? boss.name : p.name,initial:i ? String(i).padStart(2,"0") : "你",
+        bet:p.streetBet && !game.finished ? fmt(p.streetBet)+" BB" : "",
+        recent:aofRecent?.actor===i ? p.lastAction+(p.streetBet && /^(下注|加注|跟注|ALL-IN)/.test(p.lastAction) ? " BB" : "") : "",
+        slot:SEAT_SLOTS[4][i],name:i===boss?.seat ? boss.name : p.name,
         position:tablePosition(game,i),stack:`${fmt(p.stack)} BB`,action:p.lastAction,
         sample:stats[i].hands,
         metrics:[`推牌率 ${hudRate(stats[i].pushes,stats[i].pushOpportunities)}（${stats[i].pushOpportunities} 次機會）`,`跟全押率 ${hudRate(stats[i].calls,stats[i].callOpportunities)}（${stats[i].callOpportunities} 次機會）`],
-        stats:exposed && !p.folded && equities.length ? `${view.board.length<4?"估算":""}權益 ${fmt(equities[contenders.indexOf(i)]*100)}%` : mobile.hud ? `推 ${hudRate(stats[i].pushes,stats[i].pushOpportunities)} · 跟 ${hudRate(stats[i].calls,stats[i].callOpportunities)}`:"",
+        stats:exposed && !p.folded && equities.length ? `${view.board.length<4?"估算":""}權益 ${fmt(equities[contenders.indexOf(i)]*100)}%` : mobile.hud && stats[i].hands>0 ? `推 ${hudRate(stats[i].pushes,stats[i].pushOpportunities)} · 跟 ${hudRate(stats[i].calls,stats[i].callOpportunities)}`:"",
         cards:i===0 || exposed && !p.folded || foldReveal && winners.includes(i)?p.hole.map(portraitCard):[],folded:p.folded,acting:game.turn===i
       }))}}/>{squeezePending && <RiverSqueeze card={game.board[4]} mini context={{board:view.board, players:contenders.map(i => ({name:game.players[i].name, hole:game.players[i].hole}))}} onReveal={() => onChange({ ...state, revealStep: 4 })} onSkip={() => onChange({ ...state, revealStep: 5 })} />}</> : <section className={`aof-table ${revealing ? "aof-showdown" : ""} ${revealing && cinematic ? "aof-cinematic" : ""} ${moment && cinematic && revealing ? "aof-destiny" : ""} ${paid && cinematic ? "aof-cinematic-result" : ""}`} aria-label="AOF牌桌">
       {revealing && cinematic && <div className="aof-stage-banner" key={`${game.handNo}-${step}`}><small>SHOWDOWN 2.0</small><strong>{stageLabel}</strong><i><span style={{ width: `${((step+1)/5)*100}%` }} /></i></div>}
@@ -1747,7 +1777,7 @@ function AofTable({ state, onChange, onExit, onCashOut, saveStatus, squeezeEnabl
     {foldReveal && <p className="aof-fold-note">娛樂揭牌顯示收池 AI 嘅底牌及同一副牌嘅假設 runout；正式牌局已於你棄牌時完結，牌面不影響盈虧、命數或統計。</p>}
     <p className="aof-message" aria-live="polite">{revealing ? `${stageLabel} · 等待揭牌…` : foldReveal ? `${PLAYER_NAMES[game.winners[0]]} 亮牌 · 睇下如果繼續會發生咩事` : paid ? game.message : game.turn === 0 ? `輪到你 · ${facingAllIn && !canRaiseAllIn ? "跟全押" : "全押"}投入 ${fmt(game.players[0].stack)} BB · 餘下 0 BB` : `${game.players[game.turn ?? 0].name} 正在思考…`}</p>
     {nativeAof && paid && <section className="pt-settlement">
-      <strong>{handNet(game,"BB")}</strong>{actionButtons}<p>{winnerText(game)}</p>
+      <strong>{handNet(game,"BB")}</strong>{actionButtons}<p>{portraitResult(game,"BB")}</p>
       {jackpotAmount>0 && <small>Bankroll 入帳 · 壞運大獎 +{fmt(jackpotAmount)} C · {badBeatResult(game)?.board.map(portraitCard).join(" ")}</small>}
       <small>{!standard && `餘下 ${lives[0]} 條命 · `}{legacy?"練習桌":nextLifeNeeded?`補命 ${fmt(nextLifeCost)} C`:walletOpen?`桌上可兌回 ${fmt(currentStackValue)} C`:`已兌回 ${fmt(runReturned)} C`}</small>
       <details key={game.handNo}><summary>派彩明細</summary>{game.potSummary.map((line,i)=><p key={i}>{line}</p>)}</details>
@@ -2244,16 +2274,13 @@ export default function Home() {
   const effectiveRaiseTo = Math.max(minTo, Math.min(maxTo, raiseTo));
   const selectedRaiseTo = raiseAmount(effectiveRaiseTo, minTo, maxTo);
   const facingRaise = game.street === "preflop" ? game.preflopRaises > 0 : game.currentBet > 0;
-  const preset = (kind: "open2" | "open25" | "open3" | "half" | "pot" | "x2" | "x3" | "allin") => {
-    if (kind === "allin") return setRaiseTo(maxTo);
+  const presetTarget = (kind: Preset) => {
     const bb = game.bigBlind ?? 1;
-    if (kind === "open2") return setRaiseTo(chip(Math.min(maxTo, Math.max(minTo, bb * 2))));
-    if (kind === "open25") return setRaiseTo(chip(Math.min(maxTo, Math.max(minTo, bb * 2.5))));
-    if (kind === "open3") return setRaiseTo(chip(Math.min(maxTo, Math.max(minTo, bb * 3))));
-    if (kind === "half") return setRaiseTo(chip(Math.min(maxTo, Math.max(minTo, game.currentBet + pot * 0.5))));
-    if (kind === "pot") return setRaiseTo(chip(Math.min(maxTo, Math.max(minTo, game.currentBet + pot))));
-    return setRaiseTo(chip(Math.min(maxTo, Math.max(minTo, game.currentBet * (kind === "x2" ? 2 : 3)))));
+    const targets = {open2:bb*2,open25:bb*2.5,open3:bb*3,half:game.currentBet+pot*.5,
+      pot:game.currentBet+pot,x2:game.currentBet*2,x3:game.currentBet*3,allin:maxTo};
+    return kind === "allin" ? maxTo : chip(Math.min(maxTo,Math.max(minTo,targets[kind])));
   };
+  const preset = (kind: Preset) => setRaiseTo(presetTarget(kind));
 
   const hydrateSaved = (saved: SavedPokerState) => {
     setAof(saved.aof ?? null);
@@ -3123,6 +3150,13 @@ export default function Home() {
   const cost = `今次投入 ${fmt(Math.max(0,selectedRaiseTo-hero.streetBet))} ${isTournament?"籌碼":"BB"} · 合法範圍 ${fmt(minTo)}–${fmt(maxTo)}${!canRaise && toCall>0 && maxTo>game.currentBet?" · 短碼全押未重新開放加注":""}`;
   const confirmAllIn = (calling: boolean) => window.confirm(`確認 All-in${calling ? " 跟注" : ""}？今次投入 ${fmt(hero.stack)} ${isTournament ? "籌碼" : "BB"}。`);
   const unit=isTournament?"籌碼":"BB";
+  const {latest: recentAction, aggression} = mobile.portrait ? portraitStreetActions(game) : {};
+  const aggressiveSeat = aggression?.actor == null ? null : aggression.players[aggression.actor];
+  const facing = aggressiveSeat && aggression?.actor !== 0
+    ? `面對 ${aggressiveSeat.name} ${aggressiveSeat.lastAction.replace("ALL-IN", "全押")} ${unit}`
+    : `需跟注 ${fmt(Math.min(toCall,hero.stack))} ${unit}`;
+  const hasFilterRange = handFilter.scope === "global" ? handFilter.hands.length > 0
+    : RANGE_POSITIONS.some(position => handFilter.positionHands[position].length > 0);
   const extra=canRaise ? Math.max(0,selectedRaiseTo-hero.streetBet) : Math.min(hero.stack,toCall);
   const ResultBody=mobile.portrait?"details":"div";
   const handRewards=mobile.portrait && game.finished ? career.transactions.filter(tx=>{
@@ -3153,7 +3187,10 @@ export default function Home() {
     const logged = addLog(result, `你提議 ${requested} 次；${choices.map(choice => `${previous.players[choice.index].name} 接受最多 ${choice.count} 次`).join("、")}；最終派 ${runs} 次`);
     return { ...logged, message: result.message };
   })} />}<main className={`app-shell standard-motion-${motionMode} ${mobile.portrait ? "pt-shell" : ""}`} data-panel={mobile.panel} aria-hidden={!!standardCinematic || !!game.runoutPending} inert={!!standardCinematic || !!game.runoutPending}>
-    {mobile.portrait && <PortraitHeader heroTurn={!game.finished && game.turn===0} filterEnabled={handFilter.enabled} decision={(toCall>0 ? `跟注 ${fmt(Math.min(toCall,hero.stack))} ${unit}` : "可以過牌")+(timedTurnActive && tournamentClock?.turnKey===tournamentTurnKey ? ` · ${Math.ceil(tournamentClock.remainingMs/1000)} 秒`:"")} ui={mobile} title={isTournament ? (mtt?"多桌錦標賽":"單桌錦標賽") : `${tableSize} 人現金桌`}
+    {mobile.portrait && <PortraitHeader heroTurn={!game.finished && game.turn===0} autoFold={{enabled:handFilter.enabled,configured:hasFilterRange,
+      status:!handFilter.enabled ? "關閉" : handFilter.scope==="position" ? "按位置" : `全位置 · 約 ${rangePercent(handFilter.hands)}%`,
+      toggle:()=>setHandFilter(filter=>({...filter,enabled:!filter.enabled})),
+      presets:[10,25,40,100].map(size=>({size,apply:()=>setHandFilter(filter=>({...filter,scope:"global",enabled:true,hands:rangePreset(size)}))}))}} decision={(toCall>0 ? `跟注 ${fmt(Math.min(toCall,hero.stack))} ${unit}` : "可以過牌")+(timedTurnActive && tournamentClock?.turnKey===tournamentTurnKey ? ` · ${Math.ceil(tournamentClock.remainingMs/1000)} 秒`:"")} ui={mobile} title={isTournament ? (mtt?"多桌錦標賽":"單桌錦標賽") : `${tableSize} 人現金桌`}
       meta={`${saveStatus==="error"?"儲存失敗 · ":""}#${game.handNo} · ${fmt(game.smallBlind ?? .5)} / ${fmt(game.bigBlind ?? 1)} ${isTournament?"籌碼":"BB"}${game.bigBlindAnte ? " · Ante "+fmt(game.bigBlindAnte):""} · ${STREET_LABEL[game.street]}`} />}
     <div className="three-mode-picker table-mode-picker" role="group" aria-label="切換遊戲模式">
       <button className={gameMode === "cash" ? "selected" : ""} onClick={() => openModeLobby("cash")}><b>Cash</b><small>100BB</small></button>
@@ -3185,13 +3222,16 @@ export default function Home() {
           {mobile.portrait ? (!standardCinematic && <PortraitFelt onSeat={i=>{setSelectedSeat(i);mobile.setPanel("seat")}} view={{
             hand:game.tableId+"-"+game.handNo,pots:game.finished ? game.potSummary : game.players.some(p=>p.allIn) ? potsWithBigBlindAnte(game.players.map(p=>p.totalBet),game.players.map(p=>p.folded),game.bb,game.bigBlindAntePaid??0).filter(layer=>layer.contributors.length>1).map((layer,i)=>`${i?"邊池 "+i:"主池"} · ${fmt(layer.amount)} ${isTournament?"籌碼":"BB"}`) : [],
             board:game.board.map(portraitCard),pot:`${fmt(game.finished && game.showdownAwards ? game.showdownAwards.reduce((total,a)=>total+(a.refund ? 0 : a.amount),0) : pot)} ${isTournament?"籌碼":"BB"}`,
-            message:game.log[0] || game.message,hint:portraitStrength,
+            message:game.finished ? "" : recentAction?.action || game.log[0] || game.message,hint:portraitStrength,
             seats:game.players.map((p,i)=>({
-              bet:p.streetBet ? fmt(p.streetBet)+(isTournament?"":" BB") : "",slot:SEAT_SLOTS[tableSize][i],initial:i?String(i).padStart(2,"0"):"你",name:p.name,
+              bet:p.streetBet ? fmt(p.streetBet)+" "+unit : "",
+              recent:recentAction?.actor===i ? recentAction.players[i].lastAction+(p.streetBet && /^(下注|加注|跟注|ALL-IN)/.test(recentAction.players[i].lastAction) ? " "+unit : "") : "",
+              wagerLabel:aggression?.actor===i && p.streetBet ? p.lastAction.replace("ALL-IN","全押")+" "+unit : "",
+              slot:SEAT_SLOTS[tableSize][i],name:p.name,
               position:displayPosition(game,i),stack:p.allIn&&!p.stack&&!game.finished?"ALL-IN":`${fmt(p.stack)} ${isTournament?"籌碼":"BB"}`,
               action:p.lastAction,sample:sessions[i].hands,
               metrics:[`VPIP ${hudRate(sessions[i].vpipHands,sessions[i].hands)}`,`PFR ${hudRate(sessions[i].pfrHands,sessions[i].hands)}`,`3-Bet ${hudRate(sessions[i].threeBetHands,sessions[i].threeBetOpportunities)}（${sessions[i].threeBetOpportunities} 次機會）`],
-              stats:mobile.hud ? [hudRate(sessions[i].vpipHands,sessions[i].hands),hudRate(sessions[i].pfrHands,sessions[i].hands),hudRate(sessions[i].threeBetHands,sessions[i].threeBetOpportunities)].join("/"):"",
+              stats:mobile.hud && sessions[i].hands>0 ? [hudRate(sessions[i].vpipHands,sessions[i].hands),hudRate(sessions[i].pfrHands,sessions[i].hands),hudRate(sessions[i].threeBetHands,sessions[i].threeBetOpportunities)].join("/"):"",
               cards:i===0 || opponentHoleVisible(game.finished,game.street,p.folded,studyMode) ? p.hole.map(portraitCard):[],
               folded:p.folded,acting:game.turn===i
             }))}}/>) : <>
@@ -3218,10 +3258,11 @@ export default function Home() {
           {mobile.portrait ? <PortraitDock view={{
             decision:tournamentTurnKey,turn:game.turn===0,canFold:foldEnabled,
             canRaise:canRaise && game.turn===0,min:minTo,max:maxTo,value:selectedRaiseTo,
-            prompt:game.turn===0 ? `輪到你 · ${toCall>0 ? callLabel+" "+unit : "可以過牌"}` : `${queuedFold?"已預選棄牌 · ":""}${thinking?"等候 "+thinking:"等待跑牌"}`,
+            prompt:game.turn===0 ? `輪到你 · ${toCall>0 ? facing : "可以過牌"}` : `${queuedFold?"已預選棄牌 · ":""}${thinking?"等候 "+thinking:"等待跑牌"}`,
             range:`可加至 ${fmt(minTo)}–${fmt(maxTo)} ${unit}`,
-            cost:`今次投入 ${fmt(extra)} ${unit} · 餘下 ${fmt(hero.stack-extra)} ${unit}`,foldLabel,callLabel,raiseLabel,
-            presets:presets.map(id=>({id,label:PRESET_LABELS[id]})),preset,select:value=>setRaiseTo(raiseAmount(value,minTo,maxTo)),
+            cost:canRaise ? `${game.currentBet ? "加注" : "下注"}再投入 ${fmt(extra)} ${unit} · 餘下 ${fmt(hero.stack-extra)} ${unit}` : "",
+            foldLabel,callLabel:toCall>0?`${callLabel} ${unit}`:callLabel,raiseLabel:`${raiseLabel} ${unit}`,
+            presets:presets.map(id=>({id,label:PRESET_LABELS[id],target:raiseAmount(presetTarget(id),minTo,maxTo)})),preset,select:value=>setRaiseTo(raiseAmount(value,minTo,maxTo)),
             fold:foldFromDock,call:callFromDock,raise:raiseFromDock,hintOpen:!!visibleHint,hint:()=>setHint(visibleHint?null:buildGtoHint(game))
           }}/> : <>
           <button className="action secondary danger" disabled={!foldEnabled} onClick={foldFromDock}>{foldLabel}</button>
@@ -3231,7 +3272,7 @@ export default function Home() {
             {presets.map(id=><button key={id} className={id==="allin"?"preset-allin":undefined} disabled={!canRaise || game.turn!==0} onClick={()=>preset(id)}>{PRESET_LABELS[id]}</button>)}
           </div><div className="raise-input-row"><input aria-label="加注額滑桿" type="range" min={minTo} max={Math.max(minTo, maxTo)} step="0.5" value={effectiveRaiseTo} disabled={!canRaise || game.turn !== 0} onChange={event => setRaiseTo(Number(event.target.value))} /><label>至 <input aria-label="輸入下注總額" type="number" inputMode="decimal" min={minTo} max={maxTo} step="0.5" value={raiseDraft ?? String(selectedRaiseTo)} disabled={!canRaise || game.turn !== 0} onFocus={() => setRaiseDraft(String(selectedRaiseTo))} onChange={event => setRaiseDraft(event.target.value)} onBlur={() => { const value = Number(raiseDraft); if (raiseDraft?.trim() && Number.isFinite(value)) setRaiseTo(raiseAmount(value, minTo, maxTo)); setRaiseDraft(null); }} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label></div><small className="raise-cost">{cost}</small></div>
           <button className="action primary" disabled={!canRaise || game.turn !== 0} onClick={raiseFromDock}>{raiseLabel}</button></>}
-        </div>{visibleHint && <div className="gto-hint" aria-live="polite"><div className="hint-icon">✦</div><div className="hint-copy"><span>GTO COPILOT · 只用公開資訊</span><h3>{visibleHint.title}</h3><div className="hint-action-line"><strong>{visibleHint.action}</strong>{visibleHint.size && <b>{visibleHint.size}</b>}</div><p>{visibleHint.detail}</p><div className="hint-metrics">{visibleHint.metrics.map(metric => <i key={metric}>{metric}</i>)}</div></div><button className="hint-close" aria-label="關閉提示" onClick={() => setHint(null)}>×</button></div>}</> : <><div className="result-panel">{mobile.portrait && <div className="pt-result-summary"><strong>{handNet(game,unit)}</strong><p>{winnerText(game)}</p>{handRewards.map(tx=><small key={tx.id}>Bankroll 入帳 · {tx.kind==="bounty"?"賞金":"壞運大獎"} +{fmt(tx.amount)} C</small>)}</div>}<ResultBody key={game.handNo} className="result-copy">{mobile.portrait && <summary>派彩明細</summary>}<span>{matchOver ? isTournament ? mtt && mttRemaining(mtt) > 1 ? "你已出局" : "錦標賽結束" : "牌桌結束" : "本手結束"}</span><strong>{game.message}</strong>{isTournament && career.transactions.find(tx => tx.id === `tournament:${game.tableId}:entry`)?.bounty && bountyEvents(game, game.tableId, `hand-${game.handNo}`, game.mttSeatIds ?? game.players.map((_, seat) => seat), Math.round(tournamentEntry * 10)).map(event => <small className="jackpot-result" key={event.id}>賞金 · {event.eliminated === 0 ? "你" : `AI ${event.eliminated}`} 出局 · {event.recipients.map(recipient => `${recipient.id === 0 ? "你" : `AI ${recipient.id}`} +${fmt(recipient.cents / 100)} C`).join("、")}</small>)}{!isTournament && career.transactions.filter(tx => tx.id === `cash:${game.tableId}:bad-beat:hand-${game.handNo}`).map(tx => { const result = badBeatResult(game); return result && <small className="jackpot-result" key={tx.id}>✦ 壞運大獎 +{fmt(tx.amount)} C · 第 {result.run + 1} 次牌面 {result.board.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</small>; })}{game.potSummary.map(line => <small key={line}>{line}</small>)}{autoNextHand && <small className="rebuy-notice">{quickFold && gameMode === "cash" ? "↻ 快速棄牌 · 結算後開下一手" : "↻ 範圍自動棄牌 · 約 2 秒後開下一手"}</small>}{autoSpectate && <small className="rebuy-notice">你已出局 · 正在完成其餘名次</small>}{studyMode && <small className="study-result-note">◉ Study Mode：已揭示包括muck牌在內嘅AI底牌</small>}{pendingRebuys.length > 0 && !matchOver && <small className="rebuy-notice">↻ {pendingRebuys.map(index => PLAYER_NAMES[index]).join("、")} 下一手自動 Re-buy 100BB</small>}{heroOut && <small className="rebuy-notice out-notice">{isTournament ? `你以第 ${heroPlace ?? "—"} 名出局${matchOver ? "" : "；AI將繼續決出冠軍"}` : career.cash?.id === game.tableId && career.balance < 100 * career.cash.bb ? "Bankroll 不足補碼；本桌已結算" : "你已用盡兩次 Re-buy，籌碼清零後正式 OUT"}</small>}{revealedAi.length > 0 && <div className="result-hands" aria-label="AI 翻開的底牌">{revealedAi.map(player => <div className={`result-hand ${player.folded ? "study-mucked" : ""}`} key={player.id}><b>{player.name}{player.folded ? " · Fold" : ""}</b><div>{player.hole.map((card, index) => <CardView key={index} card={card} mini />)}</div></div>)}</div>}{game.runoutBoards && game.runoutBoards.length > 1 && <div className="runout-boards">{game.runoutBoards.map((board, index) => <div key={index}><b>第 {index + 1} 次</b><span>{board.map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}{game.street === "showdown" && game.board.length === 5 && (game.runoutBoards?.length ?? 1) === 1 && <div className={`standard-winning-five ${visibleMotion?.winners.length ? "animate" : ""}`} aria-label="勝出玩家最佳五張牌">{game.winners.map(index => <div key={index}><b>{game.players[index].name} · {HAND_LABEL[bestScore([...game.players[index].hole, ...game.board])[0]]}</b><span>{aofBestFive([...game.players[index].hole, ...game.board]).map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}</ResultBody><button onClick={nextHand} disabled={!!mtt && mtt.handNo <= game.handNo}>{mtt && mtt.handNo <= game.handNo ? "全場結算中…" : matchOver ? "返回選桌" : pendingRebuys.includes(0) ? "Re-buy 100BB →" : "下一手 →"}</button></div>{isTournament && matchOver && <section className="tournament-final" aria-label="錦標賽最終排名"><h2>{mtt && mttRemaining(mtt) > 1 ? "目前名次 · 全場仍在進行" : "最終排名"}</h2><p>{tournamentPrizePool ? `獎池 ${tournamentPrizePool} C` : "虛擬獎勵總額 100 點"} · {TOURNAMENT_SPEEDS[tournamentSpeed].label}</p><ol>{(mtt ? mttStandings(mtt).map(entry => ({ seat: entry.id, place: entry.place })) : standings).filter(entry => !mtt || entry.place <= 30 || entry.seat === 0).map(entry => <li key={entry.seat} className={entry.seat === 0 ? "hero" : ""}><b>第 {entry.place} 名</b><span>{entry.seat === 0 ? "你" : mtt ? `AI ${entry.seat}` : PLAYER_NAMES[entry.seat]}</span><strong>{tournamentPrizePool ? `${fmt(mtt ? mttPrize(tournamentEntry, entry.place, mttStandings(mtt).map(item => item.place)) : prizeForPlace(entry.place, tableSize, standings) * tournamentPrizePool / 100)} C` : `${prizeForPlace(entry.place, tableSize, standings)} 點`}</strong></li>)}</ol></section>}</>}
+        </div>{visibleHint && <div className="gto-hint" aria-live="polite"><div className="hint-icon">✦</div><div className="hint-copy"><span>GTO COPILOT · 只用公開資訊</span><h3>{visibleHint.title}</h3><div className="hint-action-line"><strong>{visibleHint.action}</strong>{visibleHint.size && <b>{visibleHint.size}</b>}</div><p>{visibleHint.detail}</p><div className="hint-metrics">{visibleHint.metrics.map(metric => <i key={metric}>{metric}</i>)}</div></div><button className="hint-close" aria-label="關閉提示" onClick={() => setHint(null)}>×</button></div>}</> : <><div className="result-panel">{mobile.portrait && <div className="pt-result-summary"><strong>{handNet(game,unit)}</strong><p>{portraitResult(game,unit)}</p>{handRewards.map(tx=><small key={tx.id}>Bankroll 入帳 · {tx.kind==="bounty"?"賞金":"壞運大獎"} +{fmt(tx.amount)} C</small>)}</div>}<ResultBody key={game.handNo} className="result-copy">{mobile.portrait && <summary>派彩明細</summary>}<span>{matchOver ? isTournament ? mtt && mttRemaining(mtt) > 1 ? "你已出局" : "錦標賽結束" : "牌桌結束" : "本手結束"}</span><strong>{game.message}</strong>{isTournament && career.transactions.find(tx => tx.id === `tournament:${game.tableId}:entry`)?.bounty && bountyEvents(game, game.tableId, `hand-${game.handNo}`, game.mttSeatIds ?? game.players.map((_, seat) => seat), Math.round(tournamentEntry * 10)).map(event => <small className="jackpot-result" key={event.id}>賞金 · {event.eliminated === 0 ? "你" : `AI ${event.eliminated}`} 出局 · {event.recipients.map(recipient => `${recipient.id === 0 ? "你" : `AI ${recipient.id}`} +${fmt(recipient.cents / 100)} C`).join("、")}</small>)}{!isTournament && career.transactions.filter(tx => tx.id === `cash:${game.tableId}:bad-beat:hand-${game.handNo}`).map(tx => { const result = badBeatResult(game); return result && <small className="jackpot-result" key={tx.id}>✦ 壞運大獎 +{fmt(tx.amount)} C · 第 {result.run + 1} 次牌面 {result.board.map(card => `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`).join(" ")}</small>; })}{game.potSummary.map(line => <small key={line}>{line}</small>)}{autoNextHand && <small className="rebuy-notice">{quickFold && gameMode === "cash" ? "↻ 快速棄牌 · 結算後開下一手" : "↻ 範圍自動棄牌 · 約 2 秒後開下一手"}</small>}{autoSpectate && <small className="rebuy-notice">你已出局 · 正在完成其餘名次</small>}{studyMode && <small className="study-result-note">◉ Study Mode：已揭示包括muck牌在內嘅AI底牌</small>}{pendingRebuys.length > 0 && !matchOver && <small className="rebuy-notice">↻ {pendingRebuys.map(index => PLAYER_NAMES[index]).join("、")} 下一手自動 Re-buy 100BB</small>}{heroOut && <small className="rebuy-notice out-notice">{isTournament ? `你以第 ${heroPlace ?? "—"} 名出局${matchOver ? "" : "；AI將繼續決出冠軍"}` : career.cash?.id === game.tableId && career.balance < 100 * career.cash.bb ? "Bankroll 不足補碼；本桌已結算" : "你已用盡兩次 Re-buy，籌碼清零後正式 OUT"}</small>}{revealedAi.length > 0 && <div className="result-hands" aria-label="AI 翻開的底牌">{revealedAi.map(player => <div className={`result-hand ${player.folded ? "study-mucked" : ""}`} key={player.id}><b>{player.name}{player.folded ? " · Fold" : ""}</b><div>{player.hole.map((card, index) => <CardView key={index} card={card} mini />)}</div></div>)}</div>}{game.runoutBoards && game.runoutBoards.length > 1 && <div className="runout-boards">{game.runoutBoards.map((board, index) => <div key={index}><b>第 {index + 1} 次</b><span>{board.map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}{game.street === "showdown" && game.board.length === 5 && (game.runoutBoards?.length ?? 1) === 1 && <div className={`standard-winning-five ${visibleMotion?.winners.length ? "animate" : ""}`} aria-label="勝出玩家最佳五張牌">{game.winners.map(index => <div key={index}><b>{game.players[index].name} · {HAND_LABEL[bestScore([...game.players[index].hole, ...game.board])[0]]}</b><span>{aofBestFive([...game.players[index].hole, ...game.board]).map(card => <CardView key={cardKey(card)} card={card} mini />)}</span></div>)}</div>}</ResultBody><button onClick={nextHand} disabled={!!mtt && mtt.handNo <= game.handNo}>{mtt && mtt.handNo <= game.handNo ? "全場結算中…" : matchOver ? "返回選桌" : pendingRebuys.includes(0) ? "Re-buy 100BB →" : "下一手 →"}</button></div>{isTournament && matchOver && <section className="tournament-final" aria-label="錦標賽最終排名"><h2>{mtt && mttRemaining(mtt) > 1 ? "目前名次 · 全場仍在進行" : "最終排名"}</h2><p>{tournamentPrizePool ? `獎池 ${tournamentPrizePool} C` : "虛擬獎勵總額 100 點"} · {TOURNAMENT_SPEEDS[tournamentSpeed].label}</p><ol>{(mtt ? mttStandings(mtt).map(entry => ({ seat: entry.id, place: entry.place })) : standings).filter(entry => !mtt || entry.place <= 30 || entry.seat === 0).map(entry => <li key={entry.seat} className={entry.seat === 0 ? "hero" : ""}><b>第 {entry.place} 名</b><span>{entry.seat === 0 ? "你" : mtt ? `AI ${entry.seat}` : PLAYER_NAMES[entry.seat]}</span><strong>{tournamentPrizePool ? `${fmt(mtt ? mttPrize(tournamentEntry, entry.place, mttStandings(mtt).map(item => item.place)) : prizeForPlace(entry.place, tableSize, standings) * tournamentPrizePool / 100)} C` : `${prizeForPlace(entry.place, tableSize, standings)} 點`}</strong></li>)}</ol></section>}</>}
       </div>
 
       <aside className="side-panel">

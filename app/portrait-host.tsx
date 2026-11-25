@@ -35,10 +35,11 @@ export function usePortraitTable() {
   },[portrait,panel]);
   return {portrait,panel,setPanel,hud,setHud};
 }
-export function PortraitHeader({ui,title,meta,heroTurn,filterEnabled,decision}:{filterEnabled?:boolean;decision?:string;heroTurn:boolean;ui:ReturnType<typeof usePortraitTable>,title:string,meta:string}) {
+export function PortraitHeader({ui,title,meta,heroTurn,autoFold,decision}:{autoFold?:{enabled:boolean;configured:boolean;status:string;toggle:()=>void;presets:{size:number;apply:()=>void}[]};decision?:string;heroTurn:boolean;ui:ReturnType<typeof usePortraitTable>,title:string,meta:string}) {
   const settings = useRef<HTMLButtonElement>(null);
   const header=useRef<HTMLElement>(null);
   const [away,setAway]=useState(false);
+  const [choosingRange,setChoosingRange]=useState(false);
   function jump(filter:boolean) {
     const shell=header.current?.closest('main');
     const target=shell?.querySelector<HTMLElement>(filter?'.hand-filter-panel':'.hand-filter-panel,.aof-bankroll');
@@ -63,12 +64,23 @@ export function PortraitHeader({ui,title,meta,heroTurn,filterEnabled,decision}:{
     hadPanel.current=!!ui.panel;
   },[ui.panel]);
   return <header ref={header} className="pt-header"><div><small>POKER CAREER</small><h1>{title}</h1></div>
-    {ui.panel ? <button className="pt-back" onClick={()=>ui.setPanel('')}>{heroTurn?'輪到你 · 返回牌桌':'返回牌桌'}</button> : <button ref={settings} onClick={()=>ui.setPanel('settings')}>牌桌設定</button>}
-    {!ui.panel && <><button onClick={()=>jump(false)}>牌桌資料</button>{filterEnabled!==undefined && <button onClick={()=>jump(true)}>自動棄牌 · {filterEnabled?'開':'關'}</button>}</>}
+    {ui.panel ? <button className="pt-back" onClick={()=>ui.setPanel('')}>{heroTurn?'輪到你 · 返回牌桌':'返回牌桌'}</button> : <button ref={settings} onClick={()=>{setChoosingRange(false);jump(false)}}>牌桌資料</button>}
+    {!ui.panel && autoFold && <div className="pt-filter-quick">
+      <button role="switch" aria-checked={autoFold.enabled} aria-expanded={!autoFold.configured ? choosingRange : undefined} onClick={()=>{
+        if(autoFold.configured) autoFold.toggle();
+        else setChoosingRange(open=>!open);
+      }}>自動棄牌 · {autoFold.status}</button>
+      <button onClick={()=>{setChoosingRange(false);jump(true)}}>編輯範圍</button>
+      {choosingRange && <section className="pt-filter-presets" aria-label="套用起手牌預設">
+        <p>範圍以外嘅牌會自動棄</p>
+        <div>{autoFold.presets.map(({size,apply})=><button key={size} onClick={()=>{apply();setChoosingRange(false)}}>套用 {size}%</button>)}</div>
+        <button onClick={()=>setChoosingRange(false)}>取消</button>
+      </section>}
+    </div>}
     {away && heroTurn && !ui.panel && <button className="pt-scroll-return" onClick={()=>{header.current?.closest('main')?.querySelector('.pt-choices,.aof-actions')?.scrollIntoView({block:'end'})}}>輪到你 · {decision || '全押或棄牌'} · 返回牌桌</button>}
     <div className="pt-meta"><span>{meta}</span><button aria-pressed={ui.hud} onClick={()=>ui.setHud(!ui.hud)}>HUD {ui.hud?'ON':'OFF'}</button></div></header>;
 }
-type SeatView = {sample:number;metrics:string[];bet:string;slot:number;name:string;initial:string;position:string;stack:string;action:string;stats:string;cards:string[];folded:boolean;acting:boolean};
+type SeatView = {sample:number;metrics:string[];bet:string;recent?:string;wagerLabel?:string;slot:number;name:string;position:string;stack:string;action:string;stats:string;cards:string[];folded:boolean;acting:boolean};
 type View = {hand:string;pots:string[];pot:string;board:string[];message:string;hint:string;seats:SeatView[]};
 export function PortraitFelt({view,onSeat}:{view:View;onSeat:(index:number)=>void}) {
   const root=useRef<HTMLDivElement>(null);
@@ -100,7 +112,7 @@ export function PortraitFelt({view,onSeat}:{view:View;onSeat:(index:number)=>voi
   return <div className="pt-native"><div ref={root} className="pt-render" aria-label="牌桌"/>
     {seat && <section className="pt-scout" aria-label={seat.name+" 座位資料"} onKeyDown={e=>{if(e.key==='Escape')close()}}>
       <header><strong>{seat.name} · {seat.position}</strong><button ref={closeButton} onClick={close} aria-label="關閉座位資料">×</button></header>
-      <p>{seat.stack} · {seat.action} · 樣本 {seat.sample} 手</p>
+      <p>{seat.stack} · {seat.action} · {seat.sample ? `樣本 ${seat.sample} 手` : "暫無觀察樣本"}</p>
       <div>{seat.metrics.map(m=><span key={m}>{m}</span>)}</div>
       <button onClick={()=>{setIndex(null);onSeat(index!)}}>完整資料</button>
     </section>}</div>;
@@ -110,7 +122,7 @@ export type Preset = 'open2'|'open25'|'open3'|'half'|'pot'|'x2'|'x3'|'allin';
 type DockView = {
   decision:string;turn:boolean;canFold:boolean;canRaise:boolean;min:number;max:number;value:number;
   prompt:string;range:string;cost:string;foldLabel:string;callLabel:string;raiseLabel:string;hintOpen:boolean;
-  presets:{id:Preset;label:string}[];preset:(id:Preset)=>void;select:(value:number)=>void;
+  presets:{id:Preset;label:string;target:number}[];preset:(id:Preset)=>void;select:(value:number)=>void;
   fold:()=>void;call:()=>void;raise:()=>void;hint:()=>void;
 };
 export function PortraitDock({view}:{view:DockView}) {

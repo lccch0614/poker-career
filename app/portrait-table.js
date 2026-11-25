@@ -28,7 +28,7 @@ function createSeat(parent,onSelect,index) {
   const seat = element('button','pt-seat',parent);
   seat.type = 'button';
   seat.onclick = () => onSelect(index);
-  const portrait = element('span','pt-avatar',seat);
+  element('span','pt-avatar',seat).setAttribute('aria-hidden','true');
   const badge = element('span','pt-position',seat);
   const name = element('strong','pt-name',seat);
   const stack = element('b','pt-stack',seat);
@@ -42,8 +42,11 @@ function createSeat(parent,onSelect,index) {
     seat.classList.toggle('folded',data.folded);
     seat.classList.toggle('acting',data.acting);
     seat.classList.toggle('has-cards',data.cards.length > 0);
-    write(portrait,data.initial);write(badge,data.position);write(name,data.name);
-    write(wager,data.bet);write(stack,data.stack);write(action,data.action);write(hud,data.stats);
+    write(badge,data.position);write(name,data.name);
+    seat.classList.toggle('recent-action', Boolean(data.recent));
+    write(wager,data.recent?.replace('ALL-IN','全押') || data.wagerLabel || data.bet);
+    wager.classList.toggle('has-chip',Boolean(data.bet));
+    write(stack,data.stack);write(action,data.acting ? (index===0 ? '輪到你' : '行動中') : '');write(hud,data.stats);
     seat.title = [data.name,data.position,data.stack,data.action,data.stats].filter(Boolean).join(' · ');
     cards.forEach((update,i)=>update(data.cards[i]));
   };
@@ -87,7 +90,7 @@ export function mountBetDock(root) {
     <input aria-label="加注額滑桿" type="range" step="0.5">
     <button type="button" aria-label="增加注碼">＋</button>
     <label>至 <input type="number" aria-label="輸入下注總額" inputmode="decimal" step="0.5"></label></div>
-    <small class="pt-range"></small><small class="raise-cost"></small>
+    <div class="pt-size-preview"><small class="raise-cost"></small><small class="pt-range"></small></div>
     <div class="pt-choices"><button class="action secondary danger"></button><button class="action secondary call-action"></button><button class="action primary"></button></div>`;
   const presets = root.querySelector('.raise-presets');
   const slider = root.querySelector('input[type=range]');
@@ -130,7 +133,11 @@ export function mountBetDock(root) {
           button.onclick=()=>view.preset(item.id);
         }
       }
-      for(const button of presets.children) button.disabled=!next.canRaise;
+      const selected = next.presets.findIndex(item=>item.target===next.value);
+      [...presets.children].forEach((button,index)=>{
+        button.disabled=!next.canRaise;
+        button.setAttribute('aria-pressed',String(next.canRaise && index===selected));
+      });
       for(const input of [slider,amount]){
         input.min=String(next.min);input.max=String(next.max);input.disabled=!next.canRaise;
         if(input!==amount || document.activeElement!==amount) input.value=String(next.value);
