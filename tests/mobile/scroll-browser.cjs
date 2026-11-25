@@ -21,15 +21,57 @@ for(let y=450;y>120;y-=30){await call('Input.dispatchTouchEvent',{type:'touchMov
 await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await pause(350);
 assert(await js('('+require(process.cwd()+'/scripts/check-portrait-scroll.cjs').toString()+')()'));
 await js("document.querySelector('main').scrollTop=document.querySelector('main').scrollHeight");await wait("!!document.querySelector('.pt-scroll-return')");await js("document.querySelector('.pt-scroll-return').click()");if(mode!=='aof'){
-  const openFilter="[...document.querySelectorAll('.pt-header button')].find(b=>b.textContent.includes('自動棄牌')).click()";
-  await js(openFilter);
-  await js("document.querySelector('.hand-filter-presets button').click()");
-  await js("const box=document.querySelector('.hand-filter-switch input');if(!box.checked)box.click()");
+  const toggle="document.querySelector('.pt-filter-quick [role=switch]')";
+  const edit="document.querySelector('.pt-filter-quick button:last-child')";
+  const top=await js("document.querySelector('main').scrollTop");
+  await js(toggle+".click()");
+  await wait("!!document.querySelector('.pt-filter-presets')");
+  assert.equal(await js(toggle+".getAttribute('aria-checked')"),'false');
+  await js("document.querySelector('.pt-filter-presets div button').click()");
+  assert.equal(await js("document.querySelector('main').scrollTop"),top);
   await wait("JSON.parse(localStorage.getItem('poker-career-save:/'))?.state?.handFilter?.enabled===true");
-  await go('','.pt-choices');await js(openFilter);
-  assert(await js("document.querySelector('.hand-filter-switch input').checked"));
-  await js("document.querySelector('.hand-filter-switch input').click()");
-  await wait("!document.querySelector('.hand-filter-switch input').checked");
+  await go('','.pt-choices');
+  assert.equal(await js(toggle+".getAttribute('aria-checked')"),'true');
+  await js(toggle+".click()");
+  await wait(toggle+".getAttribute('aria-checked')==='false'");
+  await js(edit+".click()");
+  await wait("document.querySelector('.hand-filter-panel').open");
 }
 console.log(mode,'PASS')}
+for(const [mode,callLabel,preview] of [
+  ['cash','跟注 29.5 BB','加注再投入 59 BB · 餘下 12 BB'],
+  ['blind','跟注 28.5 BB','加注再投入 58 BB · 餘下 12 BB'],
+  ['check','過牌','下注再投入'],
+  ['short','跟注 7 BB',''],
+]){
+  await go(mode,'.pt-choices');
+  await js("document.querySelector('main').scrollTop=0");
+  await pause(180);
+  await wait(`document.querySelector('.pt-choices .call-action')?.textContent===${JSON.stringify(callLabel)}`);
+  assert((await js("document.querySelector('.raise-cost').textContent")).includes(preview));
+  if(mode==='cash'){
+    assert.equal(await js("document.querySelector('.recent-action .pt-wager').textContent"),'下注 29.5 BB');
+    assert.equal(await js("document.querySelector('.pt-seat.acting .pt-action').textContent"),'輪到你');
+    if(process.env.POKER_EVIDENCE_DIR){
+      const {data}=await call('Page.captureScreenshot');
+      fs.writeFileSync(process.env.POKER_EVIDENCE_DIR+'/turn-after.png',Buffer.from(data,'base64'));
+    }
+  }
+}
+for(const [width,height] of [[390,844],[393,852],[440,956],[390,660]]){
+  await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:true});
+  await go('cash','.pt-choices');
+  await js("document.querySelector('main').scrollTop=0");
+  await pause(200);
+  assert(await js("document.querySelectorAll('.pt-seat').length===8 && document.querySelector('main').scrollWidth<=document.querySelector('main').clientWidth"));
+  if(height>=844)assert(await js("document.querySelector('.pt-choices').getBoundingClientRect().bottom<=innerHeight+1"));
+}
+await call('Emulation.setDeviceMetricsOverride',{width:430,height:932,deviceScaleFactor:1,mobile:true});
+await go('split','.pt-result-summary');
+await wait("document.querySelector('.pt-result-summary').innerText.includes('你同 2 位對手平分主池，分得 13.33 BB')");
+if(process.env.POKER_EVIDENCE_DIR){
+  const {data}=await call('Page.captureScreenshot');
+  fs.writeFileSync(process.env.POKER_EVIDENCE_DIR+'/player-split.png',Buffer.from(data,'base64'));
+}
+console.log('Decision labels and split-pot summary PASS');
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>{fixture.kill();proc.kill();clearTimeout(timer)});

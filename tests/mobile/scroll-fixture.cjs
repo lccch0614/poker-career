@@ -10,13 +10,23 @@ assert.equal(madeHandText(holes,board),'一對 J · 公共牌成對');assert.equ
 assert.equal(hudRate(0,0),'—');assert.equal(hudRate(0,10),'0%');
 function fixture(mode){
  let game=newHand(Array(8).fill(100),5,2,()=>.32,undefined,'decision-test');
- game.turn=0;game.street='turn';game.board=board;game.players[0].hole=holes;game.currentBet=29.5;game.minRaise=29.5;game.players[0].stack=71;game.players[0].streetBet=0;game.players[0].totalBet=29;game.players[2].streetBet=29.5;game.log=['AI 2 下注 29.5BB'];game.pending=game.players.map(()=>true);
- if(mode==='check')game.currentBet=0;
+ game.turn=2;game.street='turn';game.board=board;game.players[0].hole=holes;
+ game.players[0].stack=71;game.players[0].totalBet=0;
+ game.players.forEach(player=>{player.streetBet=0});
+ game.currentBet=0;game.minRaise=1;game.pending=game.players.map(()=>true);
+ game=act(game,2,'raise',29.5);game.turn=0;
+ if(mode==='check'){game.currentBet=0;game.timeline=[];}
  if(mode==='blind'){game.players[0].streetBet=1;game.players[0].stack=70;}
  if(mode==='short'){game.players[0].stack=7;game.players[0].totalBet=93;}
  if(mode==='watch'){game.turn=7;game.players.forEach((p,i)=>p.folded=i!==0&&i!==7);game.currentBet=0;}
+ if(mode==='split'){
+   game=newHand([10,20,30,30],1,2,()=>.42);
+   game.board=[10,11,12,13,14].map(rank=>c(rank,'h'));
+   game.players.forEach((p,i)=>{p.hole=[c(i+2,'c'),c(i+6,'s')];p.stack=0;p.allIn=i!==3;p.folded=i===3;p.totalBet=game.startingStacks[i]});
+   game=showdown(game);
+ }
  let aof;if(mode==='aof'){aof=newAof();aof.game.turn=0;}
- return {version:2,career:newCareerWallet(),savedAt:Date.now(),started:true,hasActiveTable:true,game,gameMode:['watch','tournament'].includes(mode)?'tournament':'cash',lobbySize:game.players.length,difficulty:'casual',sessions:game.players.map(()=>emptySessionStats()),handHistory:[],coachReviews:[],profitHistory:[],aof,aofOpen:!!aof};
+ return {version:2,career:newCareerWallet(),savedAt:Date.now(),started:true,hasActiveTable:true,handFilter:{enabled:false,scope:'global',hands:[],positionHands:{}},game,gameMode:['watch','tournament'].includes(mode)?'tournament':'cash',lobbySize:game.players.length,difficulty:'casual',sessions:game.players.map(()=>emptySessionStats()),handHistory:[],coachReviews:[],profitHistory:[],aof,aofOpen:!!aof};
 }
 const server=require('http').createServer((req,res)=>{
  const u=new URL(req.url,'http://localhost');let f=path.join(root,'dist',u.pathname==='/'?'index.html':u.pathname);
