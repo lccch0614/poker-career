@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, filename) => {
   let source = fs.readFileSync(filename, 'utf8');
-  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, shouldSqueezeRunout, shouldShowHeroAllIn, runoutStages, ShowdownContext, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights };';
+  if (filename.endsWith('/app/page.tsx')) source += '\nexport { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, shouldSqueezeRunout, shouldShowHeroAllIn, runoutStages, ShowdownContext, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights, madeHandText, handNet, hudRate, winnerText };';
   mod._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
-const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, shouldSqueezeRunout, shouldShowHeroAllIn, runoutStages, ShowdownContext, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights } = require('../app/page.tsx');
+const { newHand, act, mayRaise, forcedRunoutReady, advanceStreet, showdown, shouldPlayStandardCinematic, shouldSqueezeRunout, shouldShowHeroAllIn, runoutStages, ShowdownContext, StandardShowdown, allInEvDelta, buildHandRecord, HandReviewModal, opponentHoleVisible, raiseAmount, awardUncontested, isRecoverablePokerState, CardView, settlementFlights, madeHandText, handNet, hudRate, winnerText } = require('../app/page.tsx');
 for (const runs of [1, 2, 3]) {
   let game = { ...newHand([20, 20], 0, 1, () => .41), allowRunouts: true };
   game = act(game, game.turn, 'raise', 20);
@@ -353,3 +353,19 @@ assert.deepEqual(settlementFlights(undefined), []);
  assert.equal(finalWallet.balance,3055);
  assert.deepEqual(finalWallet.transactions.map(entry=>entry.kind),['entry','bounty','prize']);
 }
+
+// Portrait summaries must agree with settled stacks and public made hands.
+const cardOf = (rank, suit) => ({rank, suit});
+const pairedBoard = [cardOf(14,'d'),cardOf(11,'d'),cardOf(6,'d'),cardOf(11,'h')];
+assert.equal(madeHandText([cardOf(13,'h'),cardOf(10,'h')],pairedBoard),'一對 J · 公共牌成對');
+assert.equal(madeHandText([cardOf(11,'s'),cardOf(2,'s')],pairedBoard.slice(0,3)),'一對 J · 底牌參與成對');
+const sharedStraight = [2,3,4,5,6].map((rank,i)=>cardOf(rank,i%2?'h':'d'));
+assert.match(madeHandText([cardOf(6,'c'),cardOf(13,'c')],sharedStraight),/公共牌組成/);
+assert.equal(hudRate(0,0),'—');
+assert.equal(hudRate(0,10),'0%');
+const tiedGame = newHand([10,20,30,30],1,2,()=>.42);
+tiedGame.board=[10,11,12,13,14].map(rank=>cardOf(rank,'h'));
+tiedGame.players.forEach((p,i)=>{p.hole=[cardOf(i+2,'c'),cardOf(i+6,'s')];p.stack=0;p.allIn=i!==3;p.folded=i===3;p.totalBet=tiedGame.startingStacks[i]});
+const tiedResult=showdown(tiedGame);
+assert.equal(handNet(tiedResult,'BB'),'本手淨額 +3.33 BB');
+assert.match(winnerText(tiedResult),/你 同花順、AI 1 同花順、AI 2 同花順/);
