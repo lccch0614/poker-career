@@ -98,3 +98,32 @@ main.pt-shell:not([data-panel=""]),main.pt-aof:not([data-panel=""]){display:bloc
 .pt-betdock .raise-presets,.pt-betdock .pt-choices{flex:none}
 .pt-betdock .hint-action{order:1}
 }
+
+@media(max-width:700px) and (orientation:portrait){
+.pt-render{height:100%;position:relative}
+.pt-scout{position:absolute;z-index:9;top:31%;left:50%;transform:translateX(-50%);width:min(86%,340px);max-height:44%;overflow:auto;background:#17231d;border:1px solid #918060;border-radius:9px;box-shadow:0 4px 16px #07130a88;color:#eee9dc;padding:0 12px 4px}
+.pt-scout header,.pt-decision{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pt-scout p,.pt-scout div{margin:2px 0;font-size:13px}.pt-scout div{display:flex;flex-wrap:wrap;gap:3px 10px;color:#cdddcf}
+.pt-scout button,.pt-return-turn{min-height:44px;min-width:44px;color:#f1d98c;border:0;background:transparent}
+.pt-decision strong{font-size:14px;color:#ffdc82}
+.pt-shell .pt-betdock .pt-decision .hint-action{flex:none;min-width:52px;min-height:44px;border:1px solid #494537}
+.pt-range{font:11px var(--mono);color:#bcb6a9;text-align:right}
+.pt-shell .pt-betdock .raise-cost{display:block;font:600 13px var(--mono);color:#e6e0cb}
+.pt-betdock[data-sizing=false] :is(.raise-presets,.raise-input-row,.pt-range,.action.primary){display:none}
+.pt-betdock[data-sizing=false] .pt-choices{grid-template-columns:1fr 1fr}
+.pt-betdock[data-turn=false] .raise-cost{display:none}
+.pt-return-turn{position:sticky;top:0;z-index:5;background:#f2ca50;color:#211c10;font-weight:bold}
+.pt-shell .table-wrap>.result-panel,.pt-settlement{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;padding:8px 12px;align-items:start}
+.pt-result-summary strong,.pt-settlement>strong{font-size:18px;color:#f2d88b}
+.pt-result-summary p,.pt-settlement p{margin:3px 0;font-size:13px}
+.pt-result-summary small{display:block;color:#b2e0bf}
+.pt-shell .result-panel>button,.pt-settlement .aof-actions{grid-area:1/2;min-height:44px}
+.pt-shell .result-panel>details,.pt-settlement details,.pt-settlement>p,.pt-settlement>small{grid-column:1/-1}
+.pt-shell .result-panel>details,.pt-settlement details{display:block;max-height:18dvh;overflow:auto}
+.pt-shell .result-panel summary,.pt-settlement summary{cursor:pointer;min-height:44px;padding:12px 0}
+.pt-aof[data-live=true][data-panel=""]>.pt-settlement{display:grid;max-height:26dvh;overflow:auto;background:#15221a;border-radius:8px}
+.pt-aof[data-live=true][data-panel=""]>.aof-message{display:block;margin:2px 0;padding:4px}
+.pt-settlement .aof-actions{margin:0}.pt-settlement .aof-actions button{padding:4px 8px}
+.pt-aof[data-live=true][data-panel=""]>.pt-native{flex:0 1 auto;height:calc(100% - 255px);min-height:0}
+.pt-aof .pt-seat[data-slot="2"],.pt-aof .pt-seat[data-slot="6"]{--y:66%}
+}

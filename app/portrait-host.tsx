@@ -5,7 +5,18 @@ export function usePortraitTable() {
   const query = '(max-width: 700px) and (orientation: portrait)';
   const [portrait,setPortrait] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
   const [panel,setPanel] = useState('');
-  const [hud,setHud] = useState(true);
+  const readHud = () => {try {return localStorage.getItem('poker-portrait-hud') !== 'off'} catch {return true}};
+  const [hud,updateHud] = useState(readHud);
+  const setHud = (value:boolean) => {
+    updateHud(value);
+    try {localStorage.setItem('poker-portrait-hud',value?'on':'off');window.dispatchEvent(new Event('portrait-hud'))} catch { /* Session preference remains usable. */ }
+  };
+  useEffect(()=>{
+    const sync=()=>updateHud(readHud());
+    window.addEventListener('portrait-hud',sync);
+    window.addEventListener('storage',sync);
+    return ()=>{window.removeEventListener('portrait-hud',sync);window.removeEventListener('storage',sync)};
+  },[]);
   useEffect(() => {
     const media = window.matchMedia(query);
     const update = () => {setPortrait(media.matches);setPanel('')};
@@ -24,7 +35,7 @@ export function usePortraitTable() {
   },[portrait,panel]);
   return {portrait,panel,setPanel,hud,setHud};
 }
-export function PortraitHeader({ui,title,meta}:{ui:ReturnType<typeof usePortraitTable>,title:string,meta:string}) {
+export function PortraitHeader({ui,title,meta,heroTurn}:{heroTurn:boolean;ui:ReturnType<typeof usePortraitTable>,title:string,meta:string}) {
   const settings = useRef<HTMLButtonElement>(null);
   const hadPanel = useRef(false);
   useLayoutEffect(()=>{
@@ -32,28 +43,51 @@ export function PortraitHeader({ui,title,meta}:{ui:ReturnType<typeof usePortrait
     hadPanel.current=!!ui.panel;
   },[ui.panel]);
   return <header className="pt-header"><div><small>POKER CAREER</small><h1>{title}</h1></div>
-    {ui.panel ? <button className="pt-back" onClick={()=>ui.setPanel('')}>返回牌桌</button> : <button ref={settings} onClick={()=>ui.setPanel('settings')}>牌桌設定</button>}
+    {ui.panel ? <button className="pt-back" onClick={()=>ui.setPanel('')}>{heroTurn?'輪到你 · 返回牌桌':'返回牌桌'}</button> : <button ref={settings} onClick={()=>ui.setPanel('settings')}>牌桌設定</button>}
     <div className="pt-meta"><span>{meta}</span><button aria-pressed={ui.hud} onClick={()=>ui.setHud(!ui.hud)}>HUD {ui.hud?'ON':'OFF'}</button></div></header>;
 }
-type SeatView = {bet:string;slot:number;name:string;initial:string;position:string;stack:string;action:string;stats:string;cards:string[];folded:boolean;acting:boolean};
-type View = {pots:string[];pot:string;board:string[];message:string;hint:string;seats:SeatView[]};
+type SeatView = {sample:number;metrics:string[];bet:string;slot:number;name:string;initial:string;position:string;stack:string;action:string;stats:string;cards:string[];folded:boolean;acting:boolean};
+type View = {hand:string;pots:string[];pot:string;board:string[];message:string;hint:string;seats:SeatView[]};
 export function PortraitFelt({view,onSeat}:{view:View;onSeat:(index:number)=>void}) {
   const root=useRef<HTMLDivElement>(null);
   const render=useRef<ReturnType<typeof mountPortraitTable>|null>(null);
   const select=useRef(onSeat);
-  useLayoutEffect(()=>{select.current=onSeat});
   useLayoutEffect(()=>{
     render.current=mountPortraitTable(root.current,(index:number)=>select.current(index));
     return ()=>{render.current?.destroy();render.current=null};
   },[]);
   useLayoutEffect(()=>{render.current?.update(view)},[view]);
-  return <div className="pt-native" ref={root} aria-label="牌桌"/>;
+  const [index,setIndex] = useState<number|null>(null);
+  const closeButton=useRef<HTMLButtonElement>(null);
+  const invokingSeat=useRef<HTMLElement|null>(null);
+  const previous=useRef({hero:false,hand:view.hand});
+  const hero=view.seats[0]?.acting;
+  const close=()=>{setIndex(null);invokingSeat.current?.focus({preventScroll:true})};
+  useLayoutEffect(()=>{
+    select.current=(i:number)=>{
+      invokingSeat.current=root.current?.querySelectorAll<HTMLButtonElement>('.pt-seat')[i] ?? null;
+      setIndex(i);
+    };
+    if(previous.current.hand!==view.hand || hero && !previous.current.hero) {
+      if(index!==null) close();
+    }
+    previous.current={hero,hand:view.hand};
+  });
+  useLayoutEffect(()=>{if(index!==null) closeButton.current?.focus({preventScroll:true})},[index]);
+  const seat=index===null ? null : view.seats[index];
+  return <div className="pt-native"><div ref={root} className="pt-render" aria-label="牌桌"/>
+    {seat && <section className="pt-scout" aria-label={seat.name+" 座位資料"} onKeyDown={e=>{if(e.key==='Escape')close()}}>
+      <header><strong>{seat.name} · {seat.position}</strong><button ref={closeButton} onClick={close} aria-label="關閉座位資料">×</button></header>
+      <p>{seat.stack} · {seat.action} · 樣本 {seat.sample} 手</p>
+      <div>{seat.metrics.map(m=><span key={m}>{m}</span>)}</div>
+      <button onClick={()=>{setIndex(null);onSeat(index!)}}>完整資料</button>
+    </section>}</div>;
 }
 
 export type Preset = 'open2'|'open25'|'open3'|'half'|'pot'|'x2'|'x3'|'allin';
 type DockView = {
   decision:string;turn:boolean;canFold:boolean;canRaise:boolean;min:number;max:number;value:number;
-  cost:string;foldLabel:string;callLabel:string;raiseLabel:string;hintOpen:boolean;
+  prompt:string;range:string;cost:string;foldLabel:string;callLabel:string;raiseLabel:string;hintOpen:boolean;
   presets:{id:Preset;label:string}[];preset:(id:Preset)=>void;select:(value:number)=>void;
   fold:()=>void;call:()=>void;raise:()=>void;hint:()=>void;
 };

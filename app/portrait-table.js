@@ -82,19 +82,19 @@ export function mountPortraitTable(root,onSelect) {
 
 // Input nodes stay mounted across AI ticks so a drag or typed amount keeps focus.
 export function mountBetDock(root) {
-  root.innerHTML = `<div class="raise-presets" aria-label="快捷下注尺度"></div>
+  root.innerHTML = `<div class="pt-decision"><strong role="status"></strong><button class="action hint-action">✦ 提示</button></div><div class="raise-presets" aria-label="快捷下注尺度"></div>
     <div class="raise-input-row"><button type="button" aria-label="減少注碼">−</button>
     <input aria-label="加注額滑桿" type="range" step="0.5">
     <button type="button" aria-label="增加注碼">＋</button>
     <label>至 <input type="number" aria-label="輸入下注總額" inputmode="decimal" step="0.5"></label></div>
-    <small class="raise-cost"></small>
-    <div class="pt-choices"><button class="action secondary danger"></button><button class="action secondary call-action"></button><button class="action primary"></button></div>
-    <button class="action hint-action">✦ AI 提示</button>`;
+    <small class="pt-range"></small><small class="raise-cost"></small>
+    <div class="pt-choices"><button class="action secondary danger"></button><button class="action secondary call-action"></button><button class="action primary"></button></div>`;
   const presets = root.querySelector('.raise-presets');
   const slider = root.querySelector('input[type=range]');
   const amount = root.querySelector('input[type=number]');
   const [minus,plus] = root.querySelectorAll('.raise-input-row button');
-  const [fold,call,raise,hint] = root.querySelectorAll('.action');
+  const [fold,call,raise] = root.querySelectorAll('.pt-choices button');
+  const hint = root.querySelector('.hint-action');
   let view;
   slider.oninput = () => view.select(Number(slider.value));
   amount.onblur = () => {
@@ -117,6 +117,9 @@ export function mountBetDock(root) {
   return {
     update(next) {
       view=next;
+      write(root.querySelector('.pt-decision strong'),next.prompt);
+      write(root.querySelector('.pt-range'),next.range);
+      root.dataset.sizing=String(next.canRaise); root.dataset.turn=String(next.turn);
       const key=next.presets.map(item=>item.id).join('/');
       if(presets.dataset.key!==key){
         presets.dataset.key=key;
